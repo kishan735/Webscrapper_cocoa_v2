@@ -1,6 +1,10 @@
 // API Configuration - UPDATE THIS WITH YOUR RAILWAY URL
 const API_BASE_URL = 'https://web-production-c9ed9.up.railway.app';
 
+// Current currency (updated dynamically from API)
+let currentCurrency = 'USD';
+let currencySymbol = '$';
+
 // DOM Elements
 const elements = {
     currentPrice: document.getElementById('currentPrice'),
@@ -27,11 +31,14 @@ const elements = {
     newsCount: document.getElementById('newsCount'),
     lastUpdated: document.getElementById('lastUpdated'),
     refreshIcon: document.getElementById('refreshIcon'),
+    currencyUnit: document.getElementById('currencyUnit'),
 };
 
 // Utility Functions
 function formatPrice(price) {
-    return price ? `£${price.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--';
+    if (!price) return '--';
+    const locale = currentCurrency === 'GBP' ? 'en-GB' : 'en-US';
+    return `${currencySymbol}${price.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function formatChange(change) {
@@ -79,7 +86,16 @@ async function fetchData(endpoint) {
 function updatePrice(data) {
     if (!data) return;
 
-    elements.currentPrice.textContent = formatPrice(data.current_price).replace('$', '');
+    // Update currency from API response
+    currentCurrency = data.currency || 'USD';
+    currencySymbol = currentCurrency === 'GBP' ? '£' : '$';
+
+    // Update currency display in header
+    if (elements.currencyUnit) {
+        elements.currencyUnit.textContent = `${currentCurrency}/${data.unit || 'MT'}`;
+    }
+
+    elements.currentPrice.textContent = formatPrice(data.current_price).replace(currencySymbol, '');
     elements.currentPrice.classList.remove('loading-pulse');
 
     const changeHtml = `
