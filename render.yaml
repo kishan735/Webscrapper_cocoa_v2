@@ -8,7 +8,7 @@ services:
     region: oregon  # or your preferred region
 
     # Build configuration
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     startCommand: gunicorn app.main:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT
 
     # Environment variables (set these in Render dashboard for secrets)

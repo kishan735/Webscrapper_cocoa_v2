@@ -150,7 +150,7 @@ class NewsScraper:
             response = self._http_client.get(url)
             response.raise_for_status()
 
-            soup = BeautifulSoup(response.text, "lxml")
+            soup = BeautifulSoup(response.text, "html.parser")
 
             # Find news articles
             news_items = soup.select("article.js-article-item, div.articleItem")
