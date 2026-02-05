@@ -54,7 +54,7 @@ class AIAnalyzer:
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.7,
-            max_tokens=2000,
+            max_tokens=2500,
         )
 
         return response.choices[0].message.content
@@ -68,74 +68,60 @@ class AIAnalyzer:
     ) -> MarketOverview:
         """
         Generate a comprehensive market overview using AI.
-
-        Args:
-            price_data: Current price information
-            price_comparison: Historical price comparisons
-            news_articles: Recent news articles
-            key_factors: Key factors identified from news
-
-        Returns:
-            MarketOverview: AI-generated market overview
+        Focus on NEWS ANALYSIS and FACTORS affecting prices.
         """
         cache_key = f"overview_{price_data.current_price}_{len(news_articles)}"
         if cache_key in self._cache:
             return self._cache[cache_key]
 
-        # Prepare news summaries for the prompt
-        news_summaries = []
-        for article in news_articles[:10]:  # Limit to top 10
-            news_summaries.append(
-                f"- {article.title} (Importance: {article.importance_score:.1f}, "
-                f"Sentiment: {article.sentiment or 'N/A'})"
+        # Prepare detailed news for analysis
+        news_details = []
+        for article in news_articles[:12]:
+            news_details.append(
+                f"- HEADLINE: {article.title}\n"
+                f"  SUMMARY: {article.summary or 'No summary'}\n"
+                f"  SENTIMENT: {article.sentiment or 'neutral'}"
             )
 
-        # Prepare key factors
-        factors_text = "\n".join(
-            f"- {f['factor']}: {f['mentions']} mentions, importance {f['importance']}"
-            for f in key_factors[:5]
-        )
+        system_prompt = """You are an expert cocoa commodities analyst. Your job is to analyze NEWS and identify FACTORS affecting cocoa prices.
 
-        system_prompt = """You are an expert commodities analyst specializing in cocoa markets.
-        Provide clear, concise, and actionable market analysis. Focus on facts and avoid speculation.
-        Always respond with valid JSON matching the required format."""
+IMPORTANT RULES:
+- Focus on analyzing the NEWS CONTENT, not just restating price numbers
+- Identify specific factors from the news: weather, disease, politics, demand shifts, currency, etc.
+- Explain the CAUSE-EFFECT relationship: what is happening and WHY it affects cocoa prices
+- Be specific about countries, regions, and events mentioned in the news
+- DO NOT just summarize price movements - explain WHAT IS DRIVING them
 
-        user_prompt = f"""Analyze the current cocoa market based on this data:
+Always respond with valid JSON only."""
 
-CURRENT PRICE DATA:
-- Current Price: ${price_data.current_price} per metric ton
-- Daily Change: {price_data.change_percent:+.2f}%
-- Day Range: ${price_data.day_low} - ${price_data.day_high}
+        user_prompt = f"""Analyze these cocoa market news articles and explain what factors are currently affecting cocoa prices:
 
-PRICE CHANGES:
-- 1 Week: {price_comparison.change_1_week or 'N/A'}%
-- 1 Month: {price_comparison.change_1_month or 'N/A'}%
-- 3 Months: {price_comparison.change_3_months or 'N/A'}%
-- 1 Year: {price_comparison.change_1_year or 'N/A'}%
+NEWS ARTICLES TO ANALYZE:
+{chr(10).join(news_details)}
 
-KEY FACTORS IDENTIFIED:
-{factors_text}
+CURRENT PRICE CONTEXT (for reference only):
+- Price: ${price_data.current_price}/MT, Daily change: {price_data.change_percent:+.2f}%
 
-RECENT NEWS:
-{chr(10).join(news_summaries)}
-
-Provide a market overview in this JSON format:
+Based on the NEWS above, provide analysis in this JSON format:
 {{
-    "summary": "2-3 sentence summary of current market conditions",
-    "key_factors": ["factor 1", "factor 2", "factor 3"],
-    "supply_conditions": "brief description of supply situation",
-    "demand_conditions": "brief description of demand situation",
-    "weather_impact": "any weather-related impacts or null",
-    "geopolitical_factors": "any geopolitical factors or null"
+    "summary": "2-3 sentences explaining the CURRENT SITUATION based on news - what events/factors are driving the market right now. Do NOT just state price numbers.",
+    "key_factors": [
+        "Factor 1: [Specific factor from news] - [How it affects cocoa prices]",
+        "Factor 2: [Specific factor from news] - [How it affects cocoa prices]",
+        "Factor 3: [Specific factor from news] - [How it affects cocoa prices]"
+    ],
+    "supply_conditions": "Based on news: What's happening with cocoa supply? (production issues, harvest conditions, farmer situations in Ivory Coast/Ghana, disease outbreaks, etc.)",
+    "demand_conditions": "Based on news: What's happening with cocoa demand? (chocolate industry, consumer trends, major buyers, seasonal demand, etc.)",
+    "weather_impact": "Based on news: Any weather events affecting cocoa? (drought, floods, El Nino, harmattan winds, etc.) - null if no weather news",
+    "geopolitical_factors": "Based on news: Any political/economic factors? (export policies, currency changes, trade disputes, farmer protests, government actions, etc.) - null if none mentioned"
 }}
 
-Respond ONLY with valid JSON, no other text."""
+IMPORTANT: Extract insights FROM THE NEWS. Do not make up factors not mentioned in the articles."""
 
         try:
             response = self._call_groq(system_prompt, user_prompt)
 
             # Parse the JSON response
-            # Clean up the response in case it has markdown code blocks
             response = response.strip()
             if response.startswith("```"):
                 response = response.split("```")[1]
@@ -158,10 +144,8 @@ Respond ONLY with valid JSON, no other text."""
             return overview
 
         except Exception as e:
-            # Return a default overview if AI analysis fails
             return MarketOverview(
-                summary=f"Cocoa is currently trading at ${price_data.current_price} per metric ton, "
-                f"with a daily change of {price_data.change_percent:+.2f}%.",
+                summary="Unable to analyze market news at this time.",
                 key_factors=[f["factor"] for f in key_factors[:3]] if key_factors else [],
                 supply_conditions=None,
                 demand_conditions=None,
@@ -177,66 +161,68 @@ Respond ONLY with valid JSON, no other text."""
         news_articles: list[NewsArticle],
     ) -> MarketOutlook:
         """
-        Generate market outlook and predictions using AI.
-
-        Args:
-            price_data: Current price information
-            price_comparison: Historical price comparisons
-            technical_indicators: Technical analysis data
-            news_articles: Recent news articles
-
-        Returns:
-            MarketOutlook: AI-generated market outlook
+        Generate market outlook based on news factors and their potential impacts.
         """
         cache_key = f"outlook_{price_data.current_price}_{technical_indicators.week_52_high}"
         if cache_key in self._cache:
             return self._cache[cache_key]
 
-        # Prepare news for context
-        news_context = "\n".join(
-            f"- {a.title} ({a.sentiment or 'neutral'})"
-            for a in news_articles[:5]
-        )
+        # Prepare detailed news for analysis
+        news_details = []
+        for article in news_articles[:10]:
+            news_details.append(
+                f"- {article.title} ({article.sentiment or 'neutral'})\n"
+                f"  {article.summary or ''}"
+            )
 
-        system_prompt = """You are an expert commodities analyst specializing in cocoa markets.
-        Provide balanced market outlooks based on available data. Be clear about uncertainties.
-        Always respond with valid JSON matching the required format."""
+        system_prompt = """You are an expert cocoa market analyst providing forward-looking analysis.
 
-        user_prompt = f"""Generate a cocoa market outlook based on this data:
+IMPORTANT RULES:
+- Base your outlook on the NEWS FACTORS, not just price trends
+- Explain HOW each factor could impact prices going forward
+- Be specific about CAUSE and EFFECT relationships
+- Identify what traders and buyers should WATCH FOR
+- Include both bullish and bearish factors
+- DO NOT just predict price direction - explain WHY based on factors
 
-CURRENT SITUATION:
-- Price: ${price_data.current_price}/MT
-- 52-Week High: ${technical_indicators.week_52_high}
-- 52-Week Low: ${technical_indicators.week_52_low}
-- Price vs 52W High: {technical_indicators.price_vs_52_high_percent:.1f}%
-- 50-Day MA: ${technical_indicators.moving_avg_50 or 'N/A'}
-- 200-Day MA: ${technical_indicators.moving_avg_200 or 'N/A'}
+Always respond with valid JSON only."""
 
-RECENT PRICE TRENDS:
-- 1 Month Change: {price_comparison.change_1_month or 'N/A'}%
-- 3 Month Change: {price_comparison.change_3_months or 'N/A'}%
-- 1 Year Change: {price_comparison.change_1_year or 'N/A'}%
+        user_prompt = f"""Based on current cocoa market news, provide a forward-looking outlook:
 
-RECENT NEWS SENTIMENT:
-{news_context}
+RECENT NEWS & EVENTS:
+{chr(10).join(news_details)}
 
-Provide an outlook in this JSON format:
+PRICE CONTEXT:
+- Current: ${price_data.current_price}/MT
+- 52-Week Range: ${technical_indicators.week_52_low} - ${technical_indicators.week_52_high}
+- YTD Change: {price_comparison.change_1_year or 'N/A'}%
+
+Provide outlook in this JSON format:
 {{
-    "short_term_outlook": "1-4 week outlook",
-    "medium_term_outlook": "1-3 month outlook",
-    "long_term_outlook": "3-12 month outlook or null if uncertain",
-    "trends_to_watch": ["trend 1", "trend 2", "trend 3"],
-    "risk_factors": ["risk 1", "risk 2"],
-    "opportunities": ["opportunity 1", "opportunity 2"],
-    "confidence_level": "low/medium/high"
+    "short_term_outlook": "1-4 weeks: Based on current news factors, what should we expect? Mention specific factors (e.g., 'Ongoing dry weather in Ivory Coast may continue to pressure supply, while...')",
+    "medium_term_outlook": "1-3 months: What factors will play out over this period? (harvest seasons, demand cycles, policy changes mentioned in news)",
+    "long_term_outlook": "3-12 months: Structural factors to consider (climate trends, industry changes, production capacity) - or null if too uncertain",
+    "trends_to_watch": [
+        "Trend 1: [Specific event/factor to monitor] - [Why it matters for cocoa prices]",
+        "Trend 2: [Specific event/factor to monitor] - [Why it matters for cocoa prices]",
+        "Trend 3: [Specific event/factor to monitor] - [Why it matters for cocoa prices]"
+    ],
+    "risk_factors": [
+        "Risk 1: [Specific risk from news] - [Potential impact: bullish/bearish and why]",
+        "Risk 2: [Specific risk from news] - [Potential impact: bullish/bearish and why]"
+    ],
+    "opportunities": [
+        "Opportunity 1: [Potential positive development] - [How it could affect market]",
+        "Opportunity 2: [Potential positive development] - [How it could affect market]"
+    ],
+    "confidence_level": "low/medium/high based on clarity of news signals"
 }}
 
-Respond ONLY with valid JSON, no other text."""
+Focus on EXPLAINING factors and their IMPACTS, not just stating price predictions."""
 
         try:
             response = self._call_groq(system_prompt, user_prompt)
 
-            # Clean up and parse JSON
             response = response.strip()
             if response.startswith("```"):
                 response = response.split("```")[1]
@@ -247,12 +233,8 @@ Respond ONLY with valid JSON, no other text."""
             data = json.loads(response)
 
             outlook = MarketOutlook(
-                short_term_outlook=data.get(
-                    "short_term_outlook", "Analysis pending"
-                ),
-                medium_term_outlook=data.get(
-                    "medium_term_outlook", "Analysis pending"
-                ),
+                short_term_outlook=data.get("short_term_outlook", "Analysis pending"),
+                medium_term_outlook=data.get("medium_term_outlook", "Analysis pending"),
                 long_term_outlook=data.get("long_term_outlook"),
                 trends_to_watch=data.get("trends_to_watch", []),
                 risk_factors=data.get("risk_factors", []),
@@ -264,11 +246,9 @@ Respond ONLY with valid JSON, no other text."""
             return outlook
 
         except Exception as e:
-            # Return a default outlook if AI analysis fails
             return MarketOutlook(
-                short_term_outlook="Market analysis temporarily unavailable. "
-                "Please check back later for updated insights.",
-                medium_term_outlook="Unable to generate medium-term outlook at this time.",
+                short_term_outlook="Market analysis temporarily unavailable.",
+                medium_term_outlook="Unable to generate outlook at this time.",
                 long_term_outlook=None,
                 trends_to_watch=[],
                 risk_factors=["Data temporarily unavailable"],
@@ -279,12 +259,6 @@ Respond ONLY with valid JSON, no other text."""
     def enhance_news_article(self, article: NewsArticle) -> NewsArticle:
         """
         Use AI to enhance news article with deeper analysis.
-
-        Args:
-            article: NewsArticle to enhance
-
-        Returns:
-            Enhanced NewsArticle with AI-generated insights
         """
         if not self.client:
             return article
@@ -313,13 +287,6 @@ Response should be plain text, not JSON."""
     ) -> str:
         """
         Generate a quick one-line summary for the dashboard.
-
-        Args:
-            price_data: Current price data
-            news_count: Number of recent news articles
-
-        Returns:
-            str: Quick summary string
         """
         direction = "up" if price_data.change_percent > 0 else "down"
         return (
