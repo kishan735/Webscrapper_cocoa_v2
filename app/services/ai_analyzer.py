@@ -83,40 +83,41 @@ class AIAnalyzer:
                 f"  SENTIMENT: {article.sentiment or 'neutral'}"
             )
 
-        system_prompt = """You are an expert cocoa commodities analyst. Your job is to analyze NEWS and identify FACTORS affecting cocoa prices.
+        system_prompt = """You are an expert cocoa commodities analyst providing ACTIONABLE intelligence to traders.
 
-IMPORTANT RULES:
-- Focus on analyzing the NEWS CONTENT, not just restating price numbers
-- Identify specific factors from the news: weather, disease, politics, demand shifts, currency, etc.
-- Explain the CAUSE-EFFECT relationship: what is happening and WHY it affects cocoa prices
-- Be specific about countries, regions, and events mentioned in the news
-- DO NOT just summarize price movements - explain WHAT IS DRIVING them
+CRITICAL RULES - FOLLOW EXACTLY:
+1. NEVER use vague phrases like "supply is tight", "demand is weak", "pressure on prices"
+2. ALWAYS explain the SPECIFIC REASON: WHO is doing WHAT, WHERE, and WHY it matters
+3. Every statement must answer: "What specific event/action is causing this?"
+4. Name specific countries, companies, weather events, policies from the news
+5. If news doesn't provide specific reasons, say "No specific details available in current news"
+
+BAD EXAMPLE: "Supply conditions are tight, putting pressure on prices"
+GOOD EXAMPLE: "Ivory Coast's Cocobod reported 15% lower arrivals in January due to black pod disease in the Sud-Comoé region, reducing available supply for Q1 shipments"
 
 Always respond with valid JSON only."""
 
-        user_prompt = f"""Analyze these cocoa market news articles and explain what factors are currently affecting cocoa prices:
+        user_prompt = f"""Analyze these cocoa news articles. For each point, provide SPECIFIC REASONS from the news - not generic statements.
 
-NEWS ARTICLES TO ANALYZE:
+NEWS TO ANALYZE:
 {chr(10).join(news_details)}
 
-CURRENT PRICE CONTEXT (for reference only):
-- Price: ${price_data.current_price}/MT, Daily change: {price_data.change_percent:+.2f}%
+Provide analysis in JSON format. REMEMBER: Every statement needs a SPECIFIC REASON from the news.
 
-Based on the NEWS above, provide analysis in this JSON format:
 {{
-    "summary": "2-3 sentences explaining the CURRENT SITUATION based on news - what events/factors are driving the market right now. Do NOT just state price numbers.",
+    "summary": "2-3 sentences with SPECIFIC events driving the market. Example: 'Ghana's cocoa regulator COCOBOD announced a 20% increase in farmgate prices effective March 1, which is expected to...' NOT 'Supply concerns are affecting prices'",
     "key_factors": [
-        "Factor 1: [Specific factor from news] - [How it affects cocoa prices]",
-        "Factor 2: [Specific factor from news] - [How it affects cocoa prices]",
-        "Factor 3: [Specific factor from news] - [How it affects cocoa prices]"
+        "SPECIFIC EVENT from news → SPECIFIC IMPACT (e.g., 'Harmattan winds in Ghana drying pods earlier than usual → May reduce mid-crop yield by estimated 10-15%')",
+        "Another SPECIFIC factor with clear cause-effect",
+        "Third SPECIFIC factor"
     ],
-    "supply_conditions": "Based on news: What's happening with cocoa supply? (production issues, harvest conditions, farmer situations in Ivory Coast/Ghana, disease outbreaks, etc.)",
-    "demand_conditions": "Based on news: What's happening with cocoa demand? (chocolate industry, consumer trends, major buyers, seasonal demand, etc.)",
-    "weather_impact": "Based on news: Any weather events affecting cocoa? (drought, floods, El Nino, harmattan winds, etc.) - null if no weather news",
-    "geopolitical_factors": "Based on news: Any political/economic factors? (export policies, currency changes, trade disputes, farmer protests, government actions, etc.) - null if none mentioned"
+    "supply_conditions": "SPECIFIC supply situation: What exactly is happening? Which country? What numbers? What cause? Example: 'Ivory Coast arrivals down 23% YoY through January per CCC data, attributed to...' If no specifics in news, say 'No specific supply data in current news'",
+    "demand_conditions": "SPECIFIC demand situation: Which buyers? What trends? Example: 'European grinders processed 12% less in Q4 per ECA, citing high prices deterring orders from...' If no specifics, say 'No specific demand data in current news'",
+    "weather_impact": "SPECIFIC weather: What weather event? Where exactly? What impact? Example: 'Below-average rainfall in Ghana's Western Region (40mm vs 80mm normal) affecting pod development' or null if none mentioned",
+    "geopolitical_factors": "SPECIFIC policy/political: What action? By whom? Example: 'Nigeria's export ban on raw beans effective Feb 1 to boost local processing' or null if none mentioned"
 }}
 
-IMPORTANT: Extract insights FROM THE NEWS. Do not make up factors not mentioned in the articles."""
+If the news lacks specific details for any field, explicitly state that rather than making vague generalizations."""
 
         try:
             response = self._call_groq(system_prompt, user_prompt)
@@ -175,50 +176,51 @@ IMPORTANT: Extract insights FROM THE NEWS. Do not make up factors not mentioned 
                 f"  {article.summary or ''}"
             )
 
-        system_prompt = """You are an expert cocoa market analyst providing forward-looking analysis.
+        system_prompt = """You are a cocoa market analyst providing SPECIFIC, ACTIONABLE forward-looking analysis.
 
-IMPORTANT RULES:
-- Base your outlook on the NEWS FACTORS, not just price trends
-- Explain HOW each factor could impact prices going forward
-- Be specific about CAUSE and EFFECT relationships
-- Identify what traders and buyers should WATCH FOR
-- Include both bullish and bearish factors
-- DO NOT just predict price direction - explain WHY based on factors
+CRITICAL RULES:
+1. NEVER say "prices may rise/fall" without explaining EXACTLY WHY based on specific news
+2. Every outlook statement must reference a SPECIFIC factor from the news
+3. Trends to watch must be SPECIFIC upcoming events with dates if available
+4. Risks must explain the MECHANISM of how they would affect prices
+
+BAD: "Prices may face upward pressure in the short term"
+GOOD: "Ghana's mid-crop harvest (April-June) typically adds 20% to annual supply, but black pod disease reports suggest this year's yield may be 15% below normal, maintaining tight supply until main crop in October"
 
 Always respond with valid JSON only."""
 
-        user_prompt = f"""Based on current cocoa market news, provide a forward-looking outlook:
+        user_prompt = f"""Based on the news below, provide outlook with SPECIFIC REASONS for each prediction.
 
-RECENT NEWS & EVENTS:
+NEWS:
 {chr(10).join(news_details)}
 
 PRICE CONTEXT:
-- Current: ${price_data.current_price}/MT
-- 52-Week Range: ${technical_indicators.week_52_low} - ${technical_indicators.week_52_high}
-- YTD Change: {price_comparison.change_1_year or 'N/A'}%
+- Current: £{price_data.current_price}/tonne (London)
+- 52-Week Range: £{technical_indicators.week_52_low} - £{technical_indicators.week_52_high}
 
-Provide outlook in this JSON format:
+Provide outlook with SPECIFIC CAUSAL EXPLANATIONS:
+
 {{
-    "short_term_outlook": "1-4 weeks: Based on current news factors, what should we expect? Mention specific factors (e.g., 'Ongoing dry weather in Ivory Coast may continue to pressure supply, while...')",
-    "medium_term_outlook": "1-3 months: What factors will play out over this period? (harvest seasons, demand cycles, policy changes mentioned in news)",
-    "long_term_outlook": "3-12 months: Structural factors to consider (climate trends, industry changes, production capacity) - or null if too uncertain",
+    "short_term_outlook": "1-4 weeks: What SPECIFIC factors from news will drive prices? Name the event, the mechanism, the expected impact. Example: 'Ivory Coast's mid-crop arrivals beginning late February will be key - if arrivals track 20% below last year as current trends suggest, expect continued tightness'",
+    "medium_term_outlook": "1-3 months: What SPECIFIC events are coming up? Example: 'European Easter chocolate demand (peaks March) combined with reported inventory drawdowns at Rotterdam warehouses suggests...'",
+    "long_term_outlook": "3-12 months: SPECIFIC structural factors only. Example: 'ICCO forecasts 150,000 tonne deficit for 2024/25 season due to aging tree stock in Ghana' or null if no specific long-term data",
     "trends_to_watch": [
-        "Trend 1: [Specific event/factor to monitor] - [Why it matters for cocoa prices]",
-        "Trend 2: [Specific event/factor to monitor] - [Why it matters for cocoa prices]",
-        "Trend 3: [Specific event/factor to monitor] - [Why it matters for cocoa prices]"
+        "SPECIFIC upcoming event with date if known → Why it matters. Example: 'Ghana COCOBOD farmgate price review (expected March) → Higher prices would incentivize production but squeeze processor margins'",
+        "Another specific trend with clear market relevance",
+        "Third specific trend"
     ],
     "risk_factors": [
-        "Risk 1: [Specific risk from news] - [Potential impact: bullish/bearish and why]",
-        "Risk 2: [Specific risk from news] - [Potential impact: bullish/bearish and why]"
+        "SPECIFIC risk → MECHANISM of price impact. Example: 'El Niño forecast through Q2 → Typically brings drought to West Africa, reduced pod development, bullish for prices'",
+        "Another specific risk with clear mechanism"
     ],
     "opportunities": [
-        "Opportunity 1: [Potential positive development] - [How it could affect market]",
-        "Opportunity 2: [Potential positive development] - [How it could affect market]"
+        "SPECIFIC opportunity from news → How to act on it",
+        "Another opportunity"
     ],
-    "confidence_level": "low/medium/high based on clarity of news signals"
+    "confidence_level": "low/medium/high - explain why based on quality of news data"
 }}
 
-Focus on EXPLAINING factors and their IMPACTS, not just stating price predictions."""
+If news lacks specific forward-looking information, state that clearly rather than guessing."""
 
         try:
             response = self._call_groq(system_prompt, user_prompt)
