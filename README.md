@@ -5,7 +5,7 @@ A comprehensive API for tracking cocoa commodity prices, market news, and AI-pow
 ## Features
 
 - **Real-time Prices**: Current cocoa futures prices from Yahoo Finance
-- **Historical Comparison**: Compare prices across different time periods (1 week, 1 month, 3 months, 6 months, 1 year)
+- **Historical Comparison**: Compare prices across different time periods
 - **Technical Analysis**: 52-week high/low, 50/200-day moving averages
 - **News Aggregation**: Curated cocoa-related news from multiple sources
 - **Importance Scoring**: Automated scoring of news impact on prices
@@ -14,10 +14,10 @@ A comprehensive API for tracking cocoa commodity prices, market news, and AI-pow
 ## Tech Stack
 
 - **Framework**: FastAPI
-- **Price Data**: Yahoo Finance (yfinance)
-- **News**: RSS feeds, web scraping (BeautifulSoup)
-- **AI Analysis**: Groq (Llama 3.3 70B)
-- **Deployment**: Render.com
+- **Price Data**: Yahoo Finance (yfinance) - FREE
+- **News**: RSS feeds, web scraping - FREE
+- **AI Analysis**: Groq (Llama 3.3 70B) - FREE tier
+- **Deployment**: Railway.app - FREE tier
 
 ## Quick Start
 
@@ -48,12 +48,31 @@ cp .env.example .env
 
 5. Run the server:
 ```bash
-python -m app.main
-# Or with uvicorn directly:
 uvicorn app.main:app --reload
 ```
 
 6. Open http://localhost:8000/docs for the API documentation.
+
+## Deploy to Railway (Recommended)
+
+Railway is the easiest way to deploy this API.
+
+### Steps:
+
+1. **Get a Groq API Key** (free): https://console.groq.com
+
+2. **Deploy to Railway**:
+   - Go to [Railway.app](https://railway.app)
+   - Click "New Project" > "Deploy from GitHub repo"
+   - Select this repository
+   - Railway auto-detects Python and deploys!
+
+3. **Add Environment Variable**:
+   - In Railway dashboard, go to your service
+   - Click "Variables" tab
+   - Add: `GROQ_API_KEY` = your_groq_api_key
+
+4. **Done!** Your API is live at the provided Railway URL.
 
 ## API Endpoints
 
@@ -88,30 +107,6 @@ uvicorn app.main:app --reload
 | `GET /health` | Health check |
 | `POST /api/v1/cache/clear` | Clear cached data |
 
-## Deployment on Render.com
-
-### Option 1: Using Blueprint (Recommended)
-
-1. Fork this repository
-2. Go to [Render Dashboard](https://dashboard.render.com)
-3. Click "New" > "Blueprint"
-4. Connect your GitHub repository
-5. Render will automatically detect `render.yaml` and configure the service
-6. Add the `GROQ_API_KEY` environment variable in the Render dashboard
-
-### Option 2: Manual Setup
-
-1. Go to [Render Dashboard](https://dashboard.render.com)
-2. Click "New" > "Web Service"
-3. Connect your GitHub repository
-4. Configure:
-   - **Runtime**: Python 3
-   - **Build Command**: `pip install -r requirements.txt`
-   - **Start Command**: `gunicorn app.main:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT`
-5. Add environment variables:
-   - `GROQ_API_KEY`: Your Groq API key
-   - `CACHE_TTL`: Cache time in seconds (default: 3600)
-
 ## Environment Variables
 
 | Variable | Required | Default | Description |
@@ -119,13 +114,6 @@ uvicorn app.main:app --reload
 | `GROQ_API_KEY` | Yes | - | API key from [Groq Console](https://console.groq.com/) |
 | `CACHE_TTL` | No | 3600 | Cache time-to-live in seconds |
 | `NEWS_LIMIT` | No | 20 | Default number of news articles |
-| `ENVIRONMENT` | No | development | Environment name |
-
-## Data Sources
-
-- **Prices**: Yahoo Finance - ICE Cocoa Futures (CC=F)
-- **News**: Google News RSS, Investing.com, CNBC, Reuters
-- **Analysis**: Groq API (Llama 3.3 70B Versatile)
 
 ## Response Examples
 
@@ -168,25 +156,15 @@ app/
 ├── main.py              # FastAPI application
 ├── config.py            # Configuration settings
 ├── models/
-│   ├── __init__.py
 │   └── schemas.py       # Pydantic models
 ├── services/
-│   ├── __init__.py
 │   ├── price_fetcher.py      # Yahoo Finance integration
 │   ├── news_scraper.py       # News aggregation
 │   ├── importance_analyzer.py # News scoring
 │   └── ai_analyzer.py        # Groq AI integration
 └── api/
-    ├── __init__.py
     └── routes.py        # API endpoints
 ```
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
 
 ## License
 
