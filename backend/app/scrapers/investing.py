@@ -216,6 +216,8 @@ def run() -> int:
         ts = datetime.utcnow()
         with get_session() as session:
             for r in rows:
+                if not r.symbol or not r.contract_month:
+                    continue
                 contract = upsert_contract(
                     session,
                     exchange="ICE_LIFFE",

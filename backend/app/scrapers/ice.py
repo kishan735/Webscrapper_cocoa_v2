@@ -186,6 +186,8 @@ def run(for_date: Optional[date] = None) -> int:
         target = for_date or rows[0].as_of or _last_business_day()
         with get_session() as session:
             for r in rows:
+                if not r.symbol or not r.contract_month:
+                    continue
                 contract = upsert_contract(
                     session,
                     exchange="ICE_LIFFE",
