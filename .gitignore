@@ -60,6 +60,15 @@ htmlcov/
 Thumbs.db
 
 # Project specific
-data/
+data/*
+!data/.gitkeep
 *.db
 *.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+node_modules/
+
+# Scrapling/Camoufox cache
+.camoufox/
+*.camoufox

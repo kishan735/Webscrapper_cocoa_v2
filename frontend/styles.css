@@ -1,0 +1,73 @@
+:root {
+  --bg: #0b0e11;
+  --panel: #11161c;
+  --panel-2: #161c24;
+  --border: #1f2832;
+  --fg: #d7dde6;
+  --fg-dim: #8a95a3;
+  --accent: #f5a623;
+  --up: #2ecc71;
+  --dn: #e74c3c;
+  --grid: #1a2129;
+  --mono: ui-monospace, "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); font-family: var(--mono); font-size: 13px; }
+a { color: var(--accent); }
+
+.bar {
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  padding: 8px 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  letter-spacing: 0.04em;
+}
+.bar:last-child {
+  border-bottom: none;
+  border-top: 1px solid var(--border);
+  position: sticky; bottom: 0;
+}
+.brand { font-weight: 700; color: var(--accent); }
+.status { color: var(--fg-dim); }
+
+main {
+  display: grid;
+  grid-template-columns: minmax(520px, 1fr) minmax(520px, 1.4fr);
+  grid-template-rows: auto auto;
+  gap: 1px;
+  background: var(--border);
+  min-height: calc(100vh - 80px);
+}
+.panel { background: var(--panel-2); padding: 14px; overflow: auto; }
+.panel.curve { grid-column: 1; grid-row: 1 / span 2; }
+.panel.chart { grid-column: 2; grid-row: 1; }
+.panel.cot   { grid-column: 2; grid-row: 2; }
+
+h2 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--fg-dim); font-weight: 600; }
+h2 .sub { color: var(--fg-dim); font-weight: 400; margin-left: 8px; }
+
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 5px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th { text-align: left; color: var(--fg-dim); font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: 0.06em; background: var(--panel); position: sticky; top: 0; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.ts, th.ts { color: var(--fg-dim); }
+
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: rgba(245, 166, 35, 0.05); }
+tbody tr.active { background: rgba(245, 166, 35, 0.1); }
+
+.up { color: var(--up); }
+.dn { color: var(--dn); }
+
+#chart { width: 100%; height: 360px; }
+#oi-chart { width: 100%; height: 120px; margin-top: 6px; }
+
+.empty {
+  text-align: center;
+  color: var(--fg-dim);
+  padding: 24px 0;
+  font-style: italic;
+}

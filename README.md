@@ -1,171 +1,98 @@
-# Cocoa Price Tracker API
+# Cocoa Intelligence Terminal — v2
 
-A comprehensive API for tracking cocoa commodity prices, market news, and AI-powered analysis.
+A Bloomberg-style intelligence terminal for the global cocoa market.
 
-## Features
+> v1 of this repo was a thin wrapper that fetched front-month spot for `CC=F` and ran a non-deterministic LLM call on every refresh. It has been removed in full. The new architecture is documented at `/root/.claude/plans/the-idea-reamins-the-smooth-wind.md`.
 
-- **Real-time Prices**: Current cocoa futures prices from Yahoo Finance
-- **Historical Comparison**: Compare prices across different time periods
-- **Technical Analysis**: 52-week high/low, 50/200-day moving averages
-- **News Aggregation**: Curated cocoa-related news from multiple sources
-- **Importance Scoring**: Automated scoring of news impact on prices
-- **AI Market Analysis**: AI-generated market overview and outlook using Groq
+## What v2 does
 
-## Tech Stack
+**Phase 1 — Market data (this commit):**
+- Full London Cocoa (ICE Liffe `C`) forward curve: every listed contract month, with settle / volume / open interest.
+- Daily ICE end-of-day report ingest (canonical settle + OI per contract).
+- 5-minute intraday quote polling from Investing.com via Scrapling (Camoufox stealth).
+- Weekly CFTC Commitments of Traders positioning ingest (free Socrata API).
+- 2-year history backfill via yfinance on cold start (continuous front-month series).
+- Frontend: dark terminal-style forward-curve table, OHLC chart with OI overlay, and weekly COT panel.
 
-- **Framework**: FastAPI
-- **Price Data**: Yahoo Finance (yfinance) - FREE
-- **News**: RSS feeds, web scraping - FREE
-- **AI Analysis**: Groq (Llama 3.3 70B) - FREE tier
-- **Deployment**: Railway.app - FREE tier
+**Phase 2 (not yet wired):** RSS news ingest + deterministic Anthropic Claude Haiku impact tagging with a hash-keyed SQLite cache.
 
-## Quick Start
+**Phase 3 (not yet wired):** Adjacent feeds — weather (Open-Meteo), FX (Frankfurter), substitutes & equity proxies (EODHD ~$20/mo), Baltic Dry, ICCO bulletins, EUDR tracker.
 
-### Local Development
+**Phase 4 (stretch):** Live AIS shipment tracking from West African origin ports.
 
-1. Clone the repository:
+## Repo layout
+
+```
+backend/
+  pyproject.toml
+  app/
+    main.py                  # FastAPI entry + lifespan
+    config.py                # pydantic-settings
+    scrapers/
+      _base.py               # scrape_run context manager
+      contracts.py           # upsert helper
+      ice.py                 # ICE EOD report (settle/volume/OI per contract)
+      investing.py           # Intraday quotes from Investing.com
+      cftc.py                # CFTC COT weekly
+      yfinance_backfill.py   # 2-year backfill on cold start
+    storage/
+      db.py                  # SQLite (WAL) + SQLModel engine
+      models.py              # Contract, QuoteIntraday, QuoteEod, CotPositioning, ScrapeLog, AiCache
+    services/
+      curve.py               # Forward-curve snapshot assembly
+    scheduler.py             # APScheduler jobs
+    api/
+      routes.py              # /api/curve, /api/contracts, /api/contract/{sym}/history, /api/positioning, /api/health, /api/admin/run/{src}
+frontend/
+  index.html
+  app.js                     # Lightweight Charts curve + OHLC + OI + COT
+  styles.css                 # Dark terminal theme
+data/
+  cocoa.db                   # SQLite (gitignored)
+```
+
+## Running locally
+
+Requires Python 3.11+.
+
 ```bash
-git clone https://github.com/kishan735/Webscrapper_cocoa_v2.git
-cd Webscrapper_cocoa_v2
+cd backend
+python -m venv .venv && source .venv/bin/activate
+pip install -e .
+
+# First-time Scrapling setup (downloads Camoufox browser)
+python -m scrapling install
+
+# Copy env template
+cp ../.env.example ../.env
+
+# Run
+uvicorn app.main:app --reload --app-dir .
 ```
 
-2. Create a virtual environment:
+Then open <http://localhost:8000>.
+
+### Trigger a scrape immediately (local debug)
+
+The scheduler waits for its cron window. To pull data right away:
+
 ```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+curl -X POST http://localhost:8000/api/admin/run/ice        # ICE EOD report (today / last business day)
+curl -X POST http://localhost:8000/api/admin/run/intraday   # Investing.com contracts table
+curl -X POST http://localhost:8000/api/admin/run/cftc       # CFTC COT latest 200 rows
 ```
 
-3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
+## Verification
 
-4. Set up environment variables:
-```bash
-cp .env.example .env
-# Edit .env and add your GROQ_API_KEY
-```
+1. `curl http://localhost:8000/api/curve | jq '.rows | length'` returns ≥6 once ICE or Investing.com scrape has run.
+2. Hit `http://localhost:8000` — forward-curve table populates, clicking a row loads OHLC into the chart.
+3. `curl http://localhost:8000/api/health` shows last-run status per source.
+4. Restart the server with an empty DB → `bootstrap.backfill` job runs and populates `quotes_eod` with the continuous series.
 
-5. Run the server:
-```bash
-uvicorn app.main:app --reload
-```
+## Hosting
 
-6. Open http://localhost:8000/docs for the API documentation.
+Deliberately undecided. The backend is a long-lived Python process with a local SQLite file — runs fine on any VPS, Fly.io, or Render. Vercel is **not** a fit (serverless timeouts, no persistent disk, shared CDN IPs blocked by ICE / Investing.com).
 
-## Deploy to Railway (Recommended)
+## Status
 
-Railway is the easiest way to deploy this API.
-
-### Steps:
-
-1. **Get a Groq API Key** (free): https://console.groq.com
-
-2. **Deploy to Railway**:
-   - Go to [Railway.app](https://railway.app)
-   - Click "New Project" > "Deploy from GitHub repo"
-   - Select this repository
-   - Railway auto-detects Python and deploys!
-
-3. **Add Environment Variable**:
-   - In Railway dashboard, go to your service
-   - Click "Variables" tab
-   - Add: `GROQ_API_KEY` = your_groq_api_key
-
-4. **Done!** Your API is live at the provided Railway URL.
-
-## API Endpoints
-
-### Price Endpoints
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/v1/price` | Current cocoa price and daily stats |
-| `GET /api/v1/price/comparison` | Price comparison over time periods |
-| `GET /api/v1/price/technical` | Technical indicators (52w high/low, MAs) |
-
-### News Endpoints
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/v1/news` | Latest cocoa news with importance scores |
-| `GET /api/v1/news/search?query=` | Search for specific news |
-
-### Analysis Endpoints
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/v1/analysis` | Complete market analysis (combines all data) |
-| `GET /api/v1/market/overview` | AI-generated market overview |
-| `GET /api/v1/market/outlook` | AI-generated market outlook |
-| `GET /api/v1/factors` | Key factors affecting prices |
-
-### System Endpoints
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /health` | Health check |
-| `POST /api/v1/cache/clear` | Clear cached data |
-
-## Environment Variables
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `GROQ_API_KEY` | Yes | - | API key from [Groq Console](https://console.groq.com/) |
-| `CACHE_TTL` | No | 3600 | Cache time-to-live in seconds |
-| `NEWS_LIMIT` | No | 20 | Default number of news articles |
-
-## Response Examples
-
-### Current Price
-```json
-{
-  "current_price": 8500.00,
-  "currency": "USD",
-  "unit": "per metric ton",
-  "timestamp": "2024-01-15T10:30:00Z",
-  "change_amount": 125.00,
-  "change_percent": 1.49,
-  "day_high": 8550.00,
-  "day_low": 8350.00,
-  "volume": 12500,
-  "open_price": 8375.00,
-  "previous_close": 8375.00
-}
-```
-
-### News Article
-```json
-{
-  "title": "Cocoa prices surge as West African drought continues",
-  "summary": "Cocoa futures hit new highs amid concerns over production...",
-  "url": "https://example.com/article",
-  "source": "Reuters",
-  "published_date": "2024-01-15T08:00:00Z",
-  "importance_score": 0.85,
-  "sentiment": "negative",
-  "impact_analysis": "Supply disruption could push prices higher"
-}
-```
-
-## Architecture
-
-```
-app/
-├── __init__.py          # Package initialization
-├── main.py              # FastAPI application
-├── config.py            # Configuration settings
-├── models/
-│   └── schemas.py       # Pydantic models
-├── services/
-│   ├── price_fetcher.py      # Yahoo Finance integration
-│   ├── news_scraper.py       # News aggregation
-│   ├── importance_analyzer.py # News scoring
-│   └── ai_analyzer.py        # Groq AI integration
-└── api/
-    └── routes.py        # API endpoints
-```
-
-## License
-
-MIT License
+Phase 1 scaffold. Real-data verification of the ICE CSV URL pattern and the Investing.com selectors is still pending (URLs/selectors live in `backend/app/config.py` and `backend/app/scrapers/*.py` respectively — designed to be adjusted in one place).
