@@ -27,7 +27,7 @@ from app.storage.models import QuoteEod
 log = logging.getLogger(__name__)
 
 
-CANDIDATE_SYMBOLS = ["CC2.L", "C-LON", "C=F"]  # try in order; first to return rows wins
+CANDIDATE_SYMBOLS = ["CC2.L", "C-LON", "CC=F"]  # try in order; first to return rows wins
 
 
 def _try_download(symbol: str, start: date, end: date):
