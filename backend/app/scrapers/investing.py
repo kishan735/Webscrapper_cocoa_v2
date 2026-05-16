@@ -91,13 +91,20 @@ def fetch_contract_rows() -> List[IntradayRow]:
     rows: List[IntradayRow] = []
     # Investing.com's contracts table uses a tbody with one tr per contract.
     # Columns (historically): Month | Last | High | Low | Chg. | Chg.% | Volume | Time
+    tr_count = 0
     for tr in response.css("table tbody tr"):
+        tr_count += 1
         tds = tr.css("td")
         if len(tds) < 6:
             continue
         cells = [td.text.clean() for td in tds]
         month_text = cells[0]
         contract_month = _normalize_contract_month(month_text)
+        # Skip rows whose first cell does not parse as a month — these are
+        # filter chips, ad rows, or table headers, not contracts.
+        if not _MONTH_RE.search(month_text or ""):
+            log.debug("skipping non-contract row: cells=%s", cells[:3])
+            continue
         symbol = re.sub(r"\s+", "", contract_month).upper()  # e.g. MAY2025
         rows.append(
             IntradayRow(
@@ -112,6 +119,7 @@ def fetch_contract_rows() -> List[IntradayRow]:
                 expiry_text=None,
             )
         )
+    log.info("investing.com: scanned %d <tr>, kept %d as contracts", tr_count, len(rows))
     return rows
 
 
