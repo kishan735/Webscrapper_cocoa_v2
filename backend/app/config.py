@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-haiku-4-5-20251001"
 
     london_cocoa_investing_url: str = "https://www.investing.com/commodities/london-cocoa-contracts"
-    ice_eod_report_base: str = "https://www.theice.com/marketdata/reports/180"
+    ice_london_cocoa_data_url: str = "https://www.ice.com/products/37089076/London-Cocoa-Futures/data"
     cftc_socrata_endpoint: str = "https://publicreporting.cftc.gov/resource/jun7-fc8e.json"
     cftc_london_cocoa_market_name: str = "COCOA - ICE FUTURES U.S."
 

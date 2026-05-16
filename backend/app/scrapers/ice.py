@@ -1,27 +1,28 @@
-"""ICE end-of-day settlement scraper for London Cocoa (futures code 'C').
+"""ICE end-of-day scraper for ICE Futures Europe Cocoa No.7 (London Cocoa, 'C').
 
-The ICE Report Center publishes a daily CSV per product with settle / volume /
-open-interest per contract month. Public, no key needed.
+Source:
+    https://www.ice.com/products/37089076/London-Cocoa-Futures/data
 
-The exact CSV URL pattern needs verification against a live request — ICE
-periodically renames endpoints. The function `download_eod_csv` is structured
-so the URL builder can be tweaked in one place.
+The legacy ``theice.com/marketdata/reports/180`` endpoint (and its CSV cousin)
+now 404 — ICE rebranded ``theice.com`` to ``ice.com`` and rebuilt the report
+center as a JS SPA whose data only loads after a form submission to
+``/api/sites/ice/proxy``. The product spec ``/data`` page, however, still
+renders a server-side HTML table with one row per listed contract
+(`Contract`, `Last`, `Time(GMT)`, `% Change`, `Volume`). That's what we parse.
 
-For the first build pass we accept two strategies:
-  1. Direct CSV download via httpx if the endpoint responds 200.
-  2. Fallback: skip and log; intraday + yfinance still populate the DB.
+Open interest is no longer published per-contract on any free public ICE page
+without the SPA dance, so this scraper records the curve without OI. The
+front-month OI is recovered from Investing.com's keyMetrics in the
+intraday scraper and merged into ``QuoteEod.open_interest`` at curve-build time.
 """
 from __future__ import annotations
 
-import csv
-import io
 import logging
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import List, Optional
 
-import httpx
 from sqlmodel import select
 
 from app.config import settings
@@ -35,22 +36,27 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class EodRow:
-    contract_month: str
-    symbol: str
-    open: Optional[float]
-    high: Optional[float]
-    low: Optional[float]
+    contract_month: str  # e.g. "Jul 2026"
+    symbol: str          # e.g. "JUL2026" (used as Contract.symbol)
     settle: Optional[float]
+    change: Optional[float]
+    change_pct: Optional[float]
     volume: Optional[int]
     open_interest: Optional[int]
+    as_of: Optional[date]
+
+
+_MONTH_CODE = {
+    "JAN": "Jan", "FEB": "Feb", "MAR": "Mar", "APR": "Apr", "MAY": "May", "JUN": "Jun",
+    "JUL": "Jul", "AUG": "Aug", "SEP": "Sep", "OCT": "Oct", "NOV": "Nov", "DEC": "Dec",
+}
+_MONTH_SHORT_RE = re.compile(r"^(?P<mon>Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?P<yr>\d{2})$", re.I)
 
 
 def _to_float(v) -> Optional[float]:
     if v is None:
         return None
-    if isinstance(v, (int, float)):
-        return float(v)
-    s = str(v).strip().replace(",", "")
+    s = str(v).strip().replace(",", "").replace("%", "").replace("+", "")
     if not s or s in {"-", "N/A", "."}:
         return None
     try:
@@ -64,98 +70,120 @@ def _to_int(v) -> Optional[int]:
     return int(f) if f is not None else None
 
 
-_MONTH_RE = re.compile(r"(?P<mon>Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s*(?P<yr>\d{2,4})", re.I)
-
-
-def _normalize_contract_month(text: str) -> str:
-    if not text:
-        return ""
-    m = _MONTH_RE.search(text)
+def _normalize_contract_month(short: str) -> Optional[str]:
+    """``Jul26`` -> ``Jul 2026``. Returns None if no match."""
+    m = _MONTH_SHORT_RE.match(short.strip())
     if not m:
-        return text.strip()
-    yr = m.group("yr")
-    if len(yr) == 2:
-        yr = "20" + yr
-    return f"{m.group('mon').title()} {yr}"
+        return None
+    return f"{_MONTH_CODE[m.group('mon').upper()]} 20{m.group('yr')}"
 
 
-def _build_csv_url(for_date: date) -> str:
-    """ICE Report Center CSV for London Cocoa daily settlement.
-
-    Report id 180 = ICE Futures Europe end-of-day. Adjust if needed.
-    """
-    base = settings.ice_eod_report_base.rstrip("/")
-    return f"{base}?selectionForm=&selectionDate={for_date.strftime('%m/%d/%Y')}&productCode=C&csv=true"
+_TIME_CELL_DATE_RE = re.compile(r"(\d{1,2})/(\d{1,2})/(\d{4})")
 
 
-def download_eod_csv(for_date: Optional[date] = None) -> Optional[str]:
-    target = for_date or _last_business_day()
-    url = _build_csv_url(target)
+def _parse_as_of(time_cell_text: str) -> Optional[date]:
+    """Extract trade date from ICE's Time(GMT) cell which embeds 'M/D/YYYY h:MM AM/PM'."""
+    m = _TIME_CELL_DATE_RE.search(time_cell_text or "")
+    if not m:
+        return None
+    mo, dy, yr = (int(x) for x in m.groups())
     try:
-        with httpx.Client(timeout=30.0, follow_redirects=True) as client:
-            r = client.get(url, headers={"User-Agent": "Mozilla/5.0"})
-        if r.status_code != 200 or not r.text.strip():
-            log.warning("ICE CSV non-200: %s url=%s", r.status_code, url)
-            return None
-        if "<html" in r.text[:200].lower():
-            log.warning("ICE CSV returned HTML (likely auth wall) url=%s", url)
-            return None
-        return r.text
-    except httpx.HTTPError as e:
-        log.warning("ICE CSV fetch failed: %s", e)
+        return date(yr, mo, dy)
+    except ValueError:
         return None
 
 
-def _last_business_day() -> date:
-    d = date.today()
+_CELL_RE = re.compile(r"<t[dh][^>]*>(?P<inner>.*?)</t[dh]>", re.S)
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _strip(html_fragment: str) -> str:
+    txt = _TAG_RE.sub(" ", html_fragment)
+    return re.sub(r"\s+", " ", txt).strip()
+
+
+def parse_ice_data_html(html: str) -> List[EodRow]:
+    """Extract contract rows from the ICE London Cocoa Futures data page HTML."""
+    table_match = re.search(r"<table[^>]*>(.*?)</table>", html, re.S)
+    if not table_match:
+        return []
+    table = table_match.group(0)
+    rows: List[EodRow] = []
+    for tr in re.finditer(r"<tr[^>]*>(?P<body>.*?)</tr>", table, re.S):
+        cells = [_strip(m.group("inner")) for m in _CELL_RE.finditer(tr.group("body"))]
+        if not cells:
+            continue
+        contract_month = _normalize_contract_month(cells[0]) if cells[0] else None
+        if not contract_month:
+            continue
+        if len(cells) < 5:
+            continue
+        last = _to_float(cells[1])
+        time_cell = cells[2] if len(cells) > 2 else ""
+        change_pct = _to_float(cells[3])
+        volume = _to_int(cells[4])
+        if last is None and volume is None:
+            continue
+        change = round(last * change_pct / 100.0, 4) if (last is not None and change_pct is not None) else None
+        symbol = re.sub(r"\s+", "", contract_month).upper()
+        rows.append(EodRow(
+            contract_month=contract_month,
+            symbol=symbol,
+            settle=last,
+            change=change,
+            change_pct=change_pct,
+            volume=volume,
+            open_interest=None,
+            as_of=_parse_as_of(time_cell),
+        ))
+    return rows
+
+
+def fetch_eod_rows() -> List[EodRow]:
+    """Fetch and parse the ICE London Cocoa Futures data page."""
+    try:
+        from scrapling.fetchers import StealthyFetcher
+    except ImportError:
+        log.error("scrapling not installed; ICE EOD scrape skipped")
+        return []
+
+    fetcher = StealthyFetcher(auto_match=True)
+    try:
+        response = fetcher.fetch(
+            settings.ice_london_cocoa_data_url,
+            headless=True,
+            network_idle=True,
+            timeout=60000,
+        )
+    except Exception as e:
+        log.warning("ICE data page fetch failed: %s", e)
+        return []
+    if response.status != 200:
+        log.warning("ICE data page returned status %s", response.status)
+        return []
+    return parse_ice_data_html(response.html_content)
+
+
+def _last_business_day(today: Optional[date] = None) -> date:
+    d = today or date.today()
     while d.weekday() >= 5:
         d -= timedelta(days=1)
     return d
 
 
-def parse_csv(csv_text: str) -> List[EodRow]:
-    rows: List[EodRow] = []
-    reader = csv.DictReader(io.StringIO(csv_text))
-    for raw in reader:
-        norm = {k.strip().lower().replace(" ", "_"): v for k, v in raw.items() if k}
-        month = (
-            norm.get("contract")
-            or norm.get("strip")
-            or norm.get("month")
-            or norm.get("contract_month")
-            or ""
-        )
-        contract_month = _normalize_contract_month(month)
-        if not contract_month:
-            continue
-        symbol = re.sub(r"\s+", "", contract_month).upper()
-        rows.append(
-            EodRow(
-                contract_month=contract_month,
-                symbol=symbol,
-                open=_to_float(norm.get("open") or norm.get("op_int_(open)")),
-                high=_to_float(norm.get("high")),
-                low=_to_float(norm.get("low")),
-                settle=_to_float(norm.get("settle") or norm.get("settlement_price")),
-                volume=_to_int(norm.get("volume") or norm.get("tot_vol")),
-                open_interest=_to_int(
-                    norm.get("open_interest") or norm.get("op_int") or norm.get("oi")
-                ),
-            )
-        )
-    return rows
-
-
 def run(for_date: Optional[date] = None) -> int:
-    target = for_date or _last_business_day()
+    """Persist the latest curve from ICE into ``QuoteEod``.
+
+    The ICE /data page always renders the most recent trading day's prices,
+    so ``for_date`` only overrides the row date stamp; on weekends/holidays
+    we still get the last trading day's data automatically.
+    """
     with scrape_run("ice.eod") as handle:
-        csv_text = download_eod_csv(target)
-        if not csv_text:
-            return 0
-        rows = parse_csv(csv_text)
+        rows = fetch_eod_rows()
         if not rows:
-            log.warning("ICE CSV parsed to 0 rows for %s", target)
+            log.warning("ICE data page returned 0 parseable rows")
             return 0
+        target = for_date or rows[0].as_of or _last_business_day()
         with get_session() as session:
             for r in rows:
                 contract = upsert_contract(
@@ -171,12 +199,10 @@ def run(for_date: Optional[date] = None) -> int:
                     )
                 ).first()
                 row = existing or QuoteEod(contract_id=contract.id, date=target)
-                row.open = r.open
-                row.high = r.high
-                row.low = r.low
                 row.settle = r.settle
                 row.volume = r.volume
-                row.open_interest = r.open_interest
+                if r.open_interest is not None:
+                    row.open_interest = r.open_interest
                 row.source = "ice"
                 session.add(row)
                 handle.rows_written += 1
