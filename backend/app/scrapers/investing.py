@@ -186,8 +186,15 @@ def fetch_contract_rows() -> List[IntradayRow]:
     """Fetch and parse the Investing.com page. Empty list on failure."""
     try:
         from scrapling.fetchers import StealthyFetcher
-    except ImportError:
-        log.error("scrapling not installed; intraday scrape skipped")
+    except ImportError as e:
+        # The legacy message said "scrapling not installed" which was wrong
+        # when scrapling was installed but a sub-dependency (patchright,
+        # playwright browsers) was missing. Surface the real cause.
+        log.error(
+            "scrapling.fetchers import failed: %s. Try: "
+            "pip install 'scrapling[fetchers]' && scrapling install",
+            e,
+        )
         return []
 
     fetcher = StealthyFetcher(auto_match=True)
@@ -212,11 +219,14 @@ def run() -> int:
     with scrape_run("investing.intraday") as handle:
         rows = fetch_contract_rows()
         if not rows:
+            log.warning("intraday: fetch returned 0 parseable rows (page format may have changed or browser not installed)")
             return 0
+        log.info("intraday: %d rows fetched, persisting…", len(rows))
         ts = datetime.utcnow()
         with get_session() as session:
             for r in rows:
                 if not r.symbol or not r.contract_month:
+                    log.debug("intraday: skipping row with empty symbol/month: %r", r)
                     continue
                 contract = upsert_contract(
                     session,
@@ -224,6 +234,7 @@ def run() -> int:
                     symbol=r.symbol,
                     contract_month=r.contract_month,
                 )
+                assert contract.id is not None, f"upsert_contract returned a row without id: {contract!r}"
                 session.add(QuoteIntraday(
                     contract_id=contract.id,
                     ts=ts,
@@ -233,5 +244,6 @@ def run() -> int:
                     change_pct=r.change_pct,
                 ))
                 handle.rows_written += 1
-        log.info("intraday scrape: %d rows", handle.rows_written)
+            session.flush()  # surface any IntegrityError before the context manager commits silently
+        log.info("intraday scrape: %d rows persisted (fetched %d)", handle.rows_written, len(rows))
         return handle.rows_written
