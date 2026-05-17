@@ -192,7 +192,7 @@ async function fetchJSON(path) {
 
 async function loadFxRate() {
   try {
-    const r = await fetch('https://api.frankfurter.app/latest?from=GBP&to=USD');
+    const r = await fetch('https://api.frankfurter.dev/v1/latest?from=GBP&to=USD');
     if (!r.ok) return;
     const data = await r.json();
     const v = data && data.rates && data.rates.USD;
