@@ -143,7 +143,7 @@ def get_positioning_csv() -> Response:
     return Response(
         content=buf.getvalue(),
         media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=cocoa-cftc.csv"},
+        headers={"Content-Disposition": 'attachment; filename="cocoa-cftc.csv"'},
     )
 
 

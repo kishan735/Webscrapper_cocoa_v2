@@ -224,6 +224,15 @@ function initFxControls() {
   if (usdBtn) usdBtn.addEventListener('click', () => setDisplayCcy('USD'));
 }
 
+function downloadCotCsv() {
+  const a = document.createElement('a');
+  a.href = '/api/positioning.csv';
+  a.download = 'cocoa-cftc.csv';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
 function setDisplayCcy(ccy) {
   if (ccy !== 'GBP' && ccy !== 'USD') return;
   displayCcy = ccy;
@@ -300,6 +309,8 @@ window.addEventListener('DOMContentLoaded', () => {
   initCharts();
   initFxControls();
   updateCurveSubtitle();
+  const dlBtn = document.getElementById('cot-download');
+  if (dlBtn) dlBtn.addEventListener('click', downloadCotCsv);
   loadFxRate();
   refreshAll();
   setInterval(refreshAll, 60_000);
