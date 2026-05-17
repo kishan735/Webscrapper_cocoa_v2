@@ -271,26 +271,6 @@ async function selectContract(symbol, label) {
 async function loadCot() {
   const data = await fetchJSON('/api/positioning');
   renderCotChart(data.rows);
-  const tbody = document.querySelector('#cot-table tbody');
-  tbody.innerHTML = '';
-  if (!data.rows.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty">No COT data yet. Triggers Fri 21:00 London, or POST /api/admin/run/cftc.</td></tr>';
-    return;
-  }
-  for (const r of [...data.rows].reverse()) {
-    const net = (r.mm_long ?? 0) - (r.mm_short ?? 0);
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${r.report_date}</td>
-      <td class="num">${fmtInt(r.mm_long)}</td>
-      <td class="num">${fmtInt(r.mm_short)}</td>
-      <td class="num ${colorClass(net)}">${net > 0 ? '+' : ''}${fmtInt(net)}</td>
-      <td class="num">${fmtInt(r.commercial_long)}</td>
-      <td class="num">${fmtInt(r.commercial_short)}</td>
-      <td class="num">${fmtInt(r.open_interest_all)}</td>
-    `;
-    tbody.appendChild(tr);
-  }
 }
 
 async function loadHealth() {
