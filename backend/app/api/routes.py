@@ -24,8 +24,12 @@ def get_curve() -> Dict[str, Any]:
 def get_contracts() -> List[Dict[str, Any]]:
     with get_session() as session:
         contracts = session.exec(
-            select(Contract).where(Contract.active == True).order_by(Contract.contract_month)  # noqa: E712
+            select(Contract)
+            .where(Contract.active == True)  # noqa: E712
+            .where(Contract.exchange == "ICE_LIFFE")
+            .where(~Contract.symbol.like("%-CONTINUOUS"))
         ).all()
+        contracts = sorted(contracts, key=lambda c: curve_service.sort_key(c.contract_month))
         return [
             {
                 "symbol": c.symbol,

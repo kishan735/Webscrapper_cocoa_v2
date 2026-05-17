@@ -6,13 +6,20 @@ change, volume, and open interest.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
 from sqlmodel import select
 
 from app.storage.db import get_session
 from app.storage.models import Contract, QuoteEod, QuoteIntraday
+
+
+def sort_key(contract_month: str) -> date:
+    try:
+        return datetime.strptime(contract_month.strip(), "%b %Y").date()
+    except ValueError:
+        return date.max
 
 
 def _latest_intraday(session, contract_id: int) -> Optional[QuoteIntraday]:
@@ -47,8 +54,12 @@ def snapshot() -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     with get_session() as session:
         contracts = session.exec(
-            select(Contract).where(Contract.active == True).order_by(Contract.contract_month)  # noqa: E712
+            select(Contract)
+            .where(Contract.active == True)  # noqa: E712
+            .where(Contract.exchange == "ICE_LIFFE")
+            .where(~Contract.symbol.like("%-CONTINUOUS"))
         ).all()
+        contracts = sorted(contracts, key=lambda c: sort_key(c.contract_month))
         for c in contracts:
             intra = _latest_intraday(session, c.id)
             eod = _latest_eod(session, c.id)

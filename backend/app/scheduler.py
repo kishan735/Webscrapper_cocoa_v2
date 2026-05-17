@@ -3,7 +3,6 @@
 - Intraday quotes: every N minutes during London session
 - ICE EOD report: ~19:30 London on weekdays
 - CFTC COT: Fridays 21:00 London (CFTC publishes ~15:30 ET Friday)
-- Backfill: once at startup, if EOD table is empty
 """
 from __future__ import annotations
 
@@ -11,26 +10,13 @@ import logging
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from sqlmodel import select
 
 from app.config import settings
-from app.scrapers import cftc, ice, investing, yfinance_backfill
-from app.storage.db import get_session
-from app.storage.models import QuoteEod
+from app.scrapers import cftc, ice, investing
 
 log = logging.getLogger(__name__)
 
 _scheduler: BackgroundScheduler | None = None
-
-
-def _backfill_if_empty() -> None:
-    with get_session() as session:
-        any_row = session.exec(select(QuoteEod).limit(1)).first()
-    if any_row:
-        log.info("backfill skipped: quotes_eod already populated")
-        return
-    log.info("backfill: pulling %d years of history", settings.backfill_years)
-    yfinance_backfill.run()
 
 
 def start() -> BackgroundScheduler:
@@ -69,12 +55,6 @@ def start() -> BackgroundScheduler:
         max_instances=1,
         coalesce=True,
         misfire_grace_time=300,
-    )
-
-    sch.add_job(
-        _backfill_if_empty,
-        trigger="date",
-        id="bootstrap.backfill",
     )
 
     sch.start()
