@@ -1,13 +1,19 @@
 """CFTC Commitments of Traders — weekly positioning for cocoa.
 
 Public Socrata REST API. No key required (rate-limited unbounded for low
-volume). Disaggregated Futures-Only report (dataset id: jun7-fc8e).
+volume). Disaggregated Futures-Only report (dataset id: 72hh-3qpy).
+
+The legacy dataset (jun7-fc8e) only carried combined commercial / non-
+commercial / nonreportable columns, so m_money / other_rept were always
+null. Switched to the disaggregated dataset which breaks "commercial" into
+producer/merchant + swap dealers and exposes managed money + other
+reportables separately. We sum producer/merchant + swap dealers back into
+the existing commercial_long/short columns to keep the schema stable.
 
 We pull all rows whose market name matches the configured cocoa market
-(default 'COCOA - ICE FUTURES U.S.'). The "London Cocoa" market on ICE is
-formally 'COCOA - LONDON' in some feeds, depending on dataset. The market
-name is configurable via settings so we can switch between Liffe London
-cocoa and ICE US cocoa without code changes.
+(default 'COCOA - ICE FUTURES U.S.'). The market name is configurable via
+settings so we can switch between Liffe London cocoa and ICE US cocoa
+without code changes.
 """
 from __future__ import annotations
 
@@ -33,6 +39,13 @@ def _to_int(v) -> Optional[int]:
         return int(float(v))
     except (TypeError, ValueError):
         return None
+
+
+def _sum_opt(a: Optional[int], b: Optional[int]) -> Optional[int]:
+    """Sum two optional ints, returning None only if both are None."""
+    if a is None and b is None:
+        return None
+    return (a or 0) + (b or 0)
 
 
 def _parse_report_date(s: str) -> Optional[date]:
@@ -83,8 +96,18 @@ def run(limit: int = 200) -> int:
                     )
                 ).first()
                 target = existing or CotPositioning(report_date=report_date, market=market)
-                target.commercial_long = _to_int(raw.get("comm_positions_long_all"))
-                target.commercial_short = _to_int(raw.get("comm_positions_short_all"))
+                # Disaggregated dataset splits the legacy "commercial" bucket
+                # into producer/merchant (PROD_MERC) + swap dealers (SWAP).
+                # Sum them back into commercial_long/short so the existing
+                # schema and chart series stay stable.
+                prod_long = _to_int(raw.get("prod_merc_positions_long"))
+                swap_long = _to_int(raw.get("swap_positions_long_all"))
+                prod_short = _to_int(raw.get("prod_merc_positions_short"))
+                # NOTE: the disaggregated dataset stores swap_short under a
+                # field with a double underscore ('swap__positions_short_all').
+                swap_short = _to_int(raw.get("swap__positions_short_all"))
+                target.commercial_long = _sum_opt(prod_long, swap_long)
+                target.commercial_short = _sum_opt(prod_short, swap_short)
                 target.mm_long = _to_int(raw.get("m_money_positions_long_all"))
                 target.mm_short = _to_int(raw.get("m_money_positions_short_all"))
                 target.other_long = _to_int(raw.get("other_rept_positions_long"))
