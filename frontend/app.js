@@ -7,10 +7,12 @@ const fmtPct = (v) => (v === null || v === undefined ? '—' : `${v > 0 ? '+' : 
 const colorClass = (v) => (v > 0 ? 'up' : v < 0 ? 'dn' : '');
 
 let chart = null;
+let oiChart = null;
 let shapeChart = null;
 let cotChart = null;
 let candleSeries = null;
 let volSeries = null;
+let oiSeries = null;
 let shapeSeries = null;
 let cotMmSeries = null;
 let cotCommSeries = null;
@@ -20,6 +22,8 @@ let lastUpdateAt = null;
 
 let fxRate = null;
 let displayCcy = 'GBP';
+let chartTimeframe = 'D';
+let chartSeries = 'continuous';
 let lastCurveRows = null;
 let lastHistoryData = null;
 
@@ -44,14 +48,28 @@ function initCharts() {
     rightPriceScale: { borderColor: '#1f2832' },
     timeScale: { borderColor: '#1f2832', timeVisible: false },
   };
-  chart = LightweightCharts.createChart(chartEl, { ...common, height: 360, autoSize: true });
+  chart = LightweightCharts.createChart(chartEl, { ...common, height: 280, autoSize: true });
   candleSeries = chart.addCandlestickSeries({ upColor: '#2ecc71', downColor: '#e74c3c', borderVisible: false, wickUpColor: '#2ecc71', wickDownColor: '#e74c3c' });
   volSeries = chart.addHistogramSeries({
     color: '#3b4654',
     priceFormat: { type: 'volume' },
     priceScaleId: 'volume',
   });
-  chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+  chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.75, bottom: 0 } });
+
+  const oiEl = document.getElementById('oi-chart');
+  if (oiEl) {
+    oiChart = LightweightCharts.createChart(oiEl, {
+      ...common,
+      height: 110,
+      autoSize: true,
+      timeScale: { ...common.timeScale, timeVisible: false, secondsVisible: false },
+    });
+    oiSeries = oiChart.addLineSeries({ color: '#f5a623', lineWidth: 2, priceLineVisible: false });
+    chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+      if (range && oiChart) oiChart.timeScale().setVisibleLogicalRange(range);
+    });
+  }
 
   const shapeEl = document.getElementById('curve-shape');
   shapeChart = LightweightCharts.createChart(shapeEl, {
@@ -155,19 +173,33 @@ function renderCurveShape(rows) {
 }
 
 function renderHistoryChart(data) {
-  const ohlc = data.ohlc.filter((r) => r.close != null).map((r) => ({
+  const rows = (data && data.ohlc) || [];
+  const ohlc = rows.filter((r) => r.close != null).map((r) => ({
     time: r.date,
     open: convertPrice(r.open ?? r.close),
     high: convertPrice(r.high ?? r.close),
     low: convertPrice(r.low ?? r.close),
     close: convertPrice(r.close),
   }));
-  const vol = data.ohlc.filter((r) => r.volume != null).map((r) => ({ time: r.date, value: r.volume, color: '#3b4654' }));
+  const vol = rows.filter((r) => r.volume != null).map((r) => ({ time: r.date, value: r.volume, color: '#3b4654' }));
+  const oi = rows.filter((r) => r.open_interest != null).map((r) => ({ time: r.date, value: r.open_interest }));
   candleSeries.setData(ohlc);
   volSeries.setData(vol);
+  if (oiSeries) oiSeries.setData(oi);
   chart.timeScale().fitContent();
+  if (oiChart) oiChart.timeScale().fitContent();
+
   const empty = document.getElementById('chart-empty');
   if (empty) empty.classList.toggle('hidden', ohlc.length > 1);
+
+  const noteEl = document.getElementById('chart-note');
+  if (noteEl) {
+    const parts = [];
+    if (data && data.series_label) parts.push(`Source: ${data.series_label}`);
+    if (oi.length === 0 && ohlc.length > 0) parts.push('OI: no source yet (yfinance feed has no OI; ICE extraction pending)');
+    if (data && data.note) parts.push(data.note);
+    noteEl.textContent = parts.join(' · ');
+  }
 }
 
 function updateCurveSubtitle() {
@@ -274,21 +306,56 @@ function highlightRow(symbol) {
   });
 }
 
-async function selectContract(symbol, label) {
-  activeSymbol = symbol;
-  activeLabel = label;
-  highlightRow(symbol);
-  document.getElementById('chart-title').textContent = label || symbol;
-  document.getElementById('chart-sub').textContent = symbol;
+async function loadHistory() {
+  if (!activeSymbol) return;
   const empty = document.getElementById('chart-empty');
+  const params = new URLSearchParams({ series: chartSeries, tf: chartTimeframe });
   try {
-    const data = await fetchJSON(`/api/contract/${encodeURIComponent(symbol)}/history`);
+    const data = await fetchJSON(`/api/contract/${encodeURIComponent(activeSymbol)}/history?${params.toString()}`);
     lastHistoryData = data;
     renderHistoryChart(data);
   } catch (e) {
     console.warn('history load failed', e);
     if (empty) empty.classList.remove('hidden');
   }
+}
+
+async function selectContract(symbol, label) {
+  activeSymbol = symbol;
+  activeLabel = label;
+  highlightRow(symbol);
+  document.getElementById('chart-title').textContent = label || symbol;
+  document.getElementById('chart-sub').textContent = symbol;
+  await loadHistory();
+}
+
+function setChartTimeframe(tf) {
+  if (!['D', 'W', 'M'].includes(tf)) return;
+  chartTimeframe = tf;
+  document.querySelectorAll('.tf-toggle button').forEach((b) => {
+    b.classList.toggle('active', b.dataset.tf === tf);
+  });
+  loadHistory();
+}
+
+function setChartSeries(series) {
+  if (!['this', 'continuous'].includes(series)) return;
+  chartSeries = series;
+  const cont = document.getElementById('series-continuous');
+  const ths = document.getElementById('series-this');
+  if (cont) cont.classList.toggle('active', series === 'continuous');
+  if (ths) ths.classList.toggle('active', series === 'this');
+  loadHistory();
+}
+
+function initChartControls() {
+  document.querySelectorAll('.tf-toggle button').forEach((b) => {
+    b.addEventListener('click', () => setChartTimeframe(b.dataset.tf));
+  });
+  const cont = document.getElementById('series-continuous');
+  const ths = document.getElementById('series-this');
+  if (cont) cont.addEventListener('click', () => setChartSeries('continuous'));
+  if (ths) ths.addEventListener('click', () => setChartSeries('this'));
 }
 
 async function loadCot() {
@@ -342,6 +409,7 @@ async function refreshAll() {
 window.addEventListener('DOMContentLoaded', () => {
   initCharts();
   initFxControls();
+  initChartControls();
   updateCurveSubtitle();
   const dlBtn = document.getElementById('cot-download');
   if (dlBtn) dlBtn.addEventListener('click', downloadCotCsv);

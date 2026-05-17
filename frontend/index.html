@@ -46,12 +46,28 @@
     </section>
 
     <section class="panel chart">
-      <h2>
-        <span id="chart-title">—</span>
-        <span class="sub" id="chart-sub"></span>
-      </h2>
+      <div class="panel-header">
+        <h2>
+          <span id="chart-title">—</span>
+          <span class="sub" id="chart-sub"></span>
+        </h2>
+        <div class="chart-controls">
+          <div class="seg series-toggle" role="group">
+            <button type="button" id="series-continuous" class="active" title="CC=F NYBOT cocoa continuous front-month (proxy)">CC1!</button>
+            <button type="button" id="series-this" title="Selected contract's own history">This</button>
+          </div>
+          <div class="seg tf-toggle" role="group">
+            <button type="button" data-tf="D" class="active">D</button>
+            <button type="button" data-tf="W">W</button>
+            <button type="button" data-tf="M">M</button>
+          </div>
+        </div>
+      </div>
       <div id="chart"></div>
-      <div id="chart-empty" class="chart-empty hidden">Single observation today — full OHLC history builds with each EOD scrape (~19:30 London).</div>
+      <h3 class="subhead">Open interest</h3>
+      <div id="oi-chart"></div>
+      <div id="chart-note" class="chart-note"></div>
+      <div id="chart-empty" class="chart-empty hidden">Single observation — switch to CC1! for historical context, or wait for the next EOD scrape.</div>
     </section>
 
     <section class="panel cot">
