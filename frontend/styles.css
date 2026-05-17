@@ -196,8 +196,11 @@ tbody tr.active { background: rgba(245, 166, 35, 0.1); }
   height: 9px;
   border-radius: 50%;
 }
-.dot-mm { background: #f5a623; }
-.dot-comm { background: #3b8a8a; }
+.dot-long { background: #2ecc71; }
+.dot-short { background: #e74c3c; }
+.dot-net { background: #d7dde6; }
+.dot-oi { background: #f5a623; }
+.legend-item small { color: var(--fg-dim); margin-left: 4px; }
 
 .panel.chart { position: relative; }
 .chart-empty {

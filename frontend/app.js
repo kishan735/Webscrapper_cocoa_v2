@@ -14,8 +14,10 @@ let candleSeries = null;
 let volSeries = null;
 let oiSeries = null;
 let shapeSeries = null;
-let cotMmSeries = null;
-let cotCommSeries = null;
+let cotLongSeries = null;
+let cotShortSeries = null;
+let cotNetSeries = null;
+let cotOiSeries = null;
 let activeSymbol = null;
 let activeLabel = null;
 let lastUpdateAt = null;
@@ -84,12 +86,16 @@ function initCharts() {
   if (cotEl) {
     cotChart = LightweightCharts.createChart(cotEl, {
       ...common,
-      height: 200,
+      height: 220,
       autoSize: true,
       timeScale: { ...common.timeScale, timeVisible: false, secondsVisible: false },
+      leftPriceScale: { visible: true, borderColor: '#1f2832' },
+      rightPriceScale: { visible: true, borderColor: '#1f2832' },
     });
-    cotMmSeries = cotChart.addLineSeries({ color: '#f5a623', lineWidth: 2, priceLineVisible: false });
-    cotCommSeries = cotChart.addLineSeries({ color: '#3b8a8a', lineWidth: 2, priceLineVisible: false });
+    cotLongSeries = cotChart.addLineSeries({ color: '#2ecc71', lineWidth: 2, priceLineVisible: false, priceScaleId: 'left' });
+    cotShortSeries = cotChart.addLineSeries({ color: '#e74c3c', lineWidth: 2, priceLineVisible: false, priceScaleId: 'left' });
+    cotNetSeries = cotChart.addLineSeries({ color: '#d7dde6', lineWidth: 2, priceLineVisible: false, priceScaleId: 'left' });
+    cotOiSeries = cotChart.addLineSeries({ color: '#f5a623', lineWidth: 2, priceLineVisible: false, priceScaleId: 'right' });
   }
 }
 
@@ -100,24 +106,26 @@ function isoDateToEpoch(iso) {
 }
 
 function renderCotChart(rows) {
-  if (!cotMmSeries || !cotCommSeries) return;
+  if (!cotLongSeries || !cotShortSeries || !cotNetSeries || !cotOiSeries) return;
   const ordered = [...rows].sort((a, b) => (a.report_date < b.report_date ? -1 : 1));
-  const mmPts = ordered
-    .map((r) => {
-      const t = isoDateToEpoch(r.report_date);
-      if (t == null || r.mm_long == null || r.mm_short == null) return null;
-      return { time: t, value: r.mm_long - r.mm_short };
-    })
-    .filter(Boolean);
-  const commPts = ordered
-    .map((r) => {
-      const t = isoDateToEpoch(r.report_date);
-      if (t == null || r.commercial_long == null || r.commercial_short == null) return null;
-      return { time: t, value: r.commercial_long - r.commercial_short };
-    })
-    .filter(Boolean);
-  cotMmSeries.setData(mmPts);
-  cotCommSeries.setData(commPts);
+  const longPts = [];
+  const shortPts = [];
+  const netPts = [];
+  const oiPts = [];
+  for (const r of ordered) {
+    const t = isoDateToEpoch(r.report_date);
+    if (t == null) continue;
+    if (r.commercial_long != null) longPts.push({ time: t, value: r.commercial_long });
+    if (r.commercial_short != null) shortPts.push({ time: t, value: r.commercial_short });
+    if (r.commercial_long != null && r.commercial_short != null) {
+      netPts.push({ time: t, value: r.commercial_long - r.commercial_short });
+    }
+    if (r.open_interest_all != null) oiPts.push({ time: t, value: r.open_interest_all });
+  }
+  cotLongSeries.setData(longPts);
+  cotShortSeries.setData(shortPts);
+  cotNetSeries.setData(netPts);
+  cotOiSeries.setData(oiPts);
   cotChart.timeScale().fitContent();
 }
 
