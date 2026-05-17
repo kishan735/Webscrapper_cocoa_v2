@@ -3,14 +3,16 @@ from __future__ import annotations
 import csv
 import io
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 from sqlmodel import select
 
 from app.scrapers import cftc, ice, investing, yfinance_backfill
+from app.scrapers.yfinance_backfill import CONTINUOUS_SYMBOL, CONTINUOUS_LABEL
 from app.services import curve as curve_service
+from app.services.resample import resample_ohlc
 from app.storage.db import get_session
 from app.storage.models import Contract, CotPositioning, QuoteEod, ScrapeLog
 
@@ -46,33 +48,65 @@ def get_contracts() -> List[Dict[str, Any]]:
 
 
 @router.get("/contract/{symbol}/history")
-def get_contract_history(symbol: str, limit: int = 730) -> Dict[str, Any]:
+def get_contract_history(
+    symbol: str,
+    limit: int = 730,
+    tf: str = "D",
+    series: str = "this",
+) -> Dict[str, Any]:
+    tf_upper = tf.upper()
+    series_lower = series.lower()
+    if tf_upper not in ("D", "W", "M"):
+        raise HTTPException(400, "tf must be one of D, W, M")
+    if series_lower not in ("this", "continuous"):
+        raise HTTPException(400, "series must be one of this, continuous")
+
     with get_session() as session:
         contract = session.exec(select(Contract).where(Contract.symbol == symbol)).first()
         if not contract:
             raise HTTPException(404, f"unknown contract {symbol}")
+
+        if series_lower == "continuous":
+            data_contract = session.exec(
+                select(Contract).where(Contract.symbol == CONTINUOUS_SYMBOL)
+            ).first()
+            if data_contract is None:
+                return {
+                    "symbol": contract.symbol,
+                    "contract_month": contract.contract_month,
+                    "series": series_lower,
+                    "series_label": CONTINUOUS_LABEL,
+                    "tf": tf_upper,
+                    "ohlc": [],
+                    "note": "Continuous series not backfilled yet. POST /api/admin/run/backfill.",
+                }
+            series_label = CONTINUOUS_LABEL
+        else:
+            data_contract = contract
+            series_label = contract.contract_month
+
         rows = session.exec(
             select(QuoteEod)
-            .where(QuoteEod.contract_id == contract.id)
-            .order_by(QuoteEod.date.desc())
-            .limit(limit)
+            .where(QuoteEod.contract_id == data_contract.id)
+            .order_by(QuoteEod.date.asc())
         ).all()
-        ohlc = [
-            {
-                "date": r.date.isoformat(),
-                "open": r.open,
-                "high": r.high,
-                "low": r.low,
-                "close": r.settle,
-                "volume": r.volume,
-                "open_interest": r.open_interest,
-            }
-            for r in reversed(rows)
-        ]
+
+        ohlc = resample_ohlc(rows, tf_upper)
+        if tf_upper == "D" and limit and len(ohlc) > limit:
+            ohlc = ohlc[-limit:]
+
+        note: Optional[str] = None
+        if series_lower == "this" and len(ohlc) < 2:
+            note = "Selected contract has < 2 observations. Switch to 'continuous' for historical context."
+
         return {
             "symbol": contract.symbol,
             "contract_month": contract.contract_month,
+            "series": series_lower,
+            "series_label": series_label,
+            "tf": tf_upper,
             "ohlc": ohlc,
+            "note": note,
         }
 
 
