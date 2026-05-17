@@ -10,12 +10,22 @@
 <body>
   <header class="bar">
     <div class="brand">COCOA · ICE LIFFE C</div>
+    <div class="fx">
+      <span class="fx-label">FX GBP→USD</span>
+      <input type="number" id="fx-rate" step="0.0001" min="0" placeholder="—" />
+      <button type="button" id="fx-refresh" title="Refetch ECB rate">↻</button>
+      <span class="fx-sep">Display</span>
+      <div class="ccy-toggle" role="group">
+        <button type="button" id="ccy-gbp" class="active">GBP</button>
+        <button type="button" id="ccy-usd">USD</button>
+      </div>
+    </div>
     <div class="status" id="status">loading…</div>
   </header>
 
   <main>
     <section class="panel curve">
-      <h2>Forward curve <span class="sub">GBP/t · ICE Liffe C</span></h2>
+      <h2>Forward curve <span class="sub" id="curve-sub">GBP/t · ICE Liffe C</span></h2>
       <table id="curve-table">
         <thead>
           <tr>

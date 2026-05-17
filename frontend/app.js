@@ -14,7 +14,13 @@ let volSeries = null;
 let oiSeries = null;
 let shapeSeries = null;
 let activeSymbol = null;
+let activeLabel = null;
 let lastUpdateAt = null;
+
+let fxRate = null;
+let displayCcy = 'GBP';
+let lastCurveRows = null;
+let lastHistoryData = null;
 
 const MONTHS = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
 
@@ -22,6 +28,11 @@ function contractMonthToEpoch(label) {
   const m = /^([A-Za-z]{3})\s+(\d{4})$/.exec((label || '').trim());
   if (!m || !(m[1] in MONTHS)) return null;
   return Math.floor(Date.UTC(parseInt(m[2], 10), MONTHS[m[1]], 15) / 1000);
+}
+
+function convertPrice(v) {
+  if (v == null || Number.isNaN(v)) return v;
+  return displayCcy === 'USD' && fxRate ? v * fxRate : v;
 }
 
 function initCharts() {
@@ -55,44 +66,25 @@ function initCharts() {
   shapeSeries = shapeChart.addLineSeries({ color: '#f5a623', lineWidth: 2, priceLineVisible: false });
 }
 
-function renderCurveShape(rows) {
-  if (!shapeSeries) return;
-  const points = rows
-    .map((r) => {
-      const t = contractMonthToEpoch(r.contract_month);
-      const v = r.settle ?? r.last;
-      return t != null && v != null ? { time: t, value: Number(v) } : null;
-    })
-    .filter(Boolean)
-    .sort((a, b) => a.time - b.time);
-  shapeSeries.setData(points);
-  shapeChart.timeScale().fitContent();
-}
-
-async function fetchJSON(path) {
-  const r = await fetch(path);
-  if (!r.ok) throw new Error(`${path} → ${r.status}`);
-  return r.json();
-}
-
-async function loadCurve() {
-  const data = await fetchJSON('/api/curve');
-  lastUpdateAt = data.as_of;
+function renderCurveTable(rows) {
   const tbody = document.querySelector('#curve-table tbody');
   tbody.innerHTML = '';
-  if (!data.rows.length) {
+  if (!rows.length) {
     tbody.innerHTML = '<tr><td colspan="8" class="empty">No contracts yet — scrapers running. Try POST /api/admin/run/ice or /api/admin/run/intraday.</td></tr>';
     return;
   }
-  for (const r of data.rows) {
+  for (const r of rows) {
     const tr = document.createElement('tr');
     tr.dataset.symbol = r.symbol;
     const chgCls = colorClass(r.change ?? 0);
+    const last = convertPrice(r.last);
+    const settle = convertPrice(r.settle);
+    const change = convertPrice(r.change);
     tr.innerHTML = `
       <td class="sym">${r.contract_month}</td>
-      <td class="num">${fmtNum(r.last)}</td>
-      <td class="num">${fmtNum(r.settle)}</td>
-      <td class="num ${chgCls}">${r.change == null ? '—' : (r.change > 0 ? '+' : '') + fmtNum(r.change)}</td>
+      <td class="num">${fmtNum(last)}</td>
+      <td class="num">${fmtNum(settle)}</td>
+      <td class="num ${chgCls}">${change == null ? '—' : (change > 0 ? '+' : '') + fmtNum(change)}</td>
       <td class="num ${chgCls}">${fmtPct(r.change_pct)}</td>
       <td class="num">${fmtInt(r.volume)}</td>
       <td class="num">${fmtInt(r.open_interest)}</td>
@@ -101,12 +93,116 @@ async function loadCurve() {
     tr.addEventListener('click', () => selectContract(r.symbol, r.contract_month));
     tbody.appendChild(tr);
   }
-  if (data.rows.every((r) => r.change == null)) {
+  if (rows.every((r) => r.change == null)) {
     const hint = document.createElement('tr');
     hint.className = 'hint';
     hint.innerHTML = '<td colspan="8">Change vs prior settle populates after the next EOD scrape (~19:30 London).</td>';
     tbody.appendChild(hint);
   }
+  if (activeSymbol) highlightRow(activeSymbol);
+}
+
+function renderCurveShape(rows) {
+  if (!shapeSeries) return;
+  const points = rows
+    .map((r) => {
+      const t = contractMonthToEpoch(r.contract_month);
+      const raw = r.settle ?? r.last;
+      const v = convertPrice(raw);
+      return t != null && v != null ? { time: t, value: Number(v) } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.time - b.time);
+  shapeSeries.setData(points);
+  shapeChart.timeScale().fitContent();
+}
+
+function renderHistoryChart(data) {
+  const ohlc = data.ohlc.filter((r) => r.close != null).map((r) => ({
+    time: r.date,
+    open: convertPrice(r.open ?? r.close),
+    high: convertPrice(r.high ?? r.close),
+    low: convertPrice(r.low ?? r.close),
+    close: convertPrice(r.close),
+  }));
+  const vol = data.ohlc.filter((r) => r.volume != null).map((r) => ({ time: r.date, value: r.volume, color: '#3b4654' }));
+  const oi = data.ohlc.filter((r) => r.open_interest != null).map((r) => ({ time: r.date, value: r.open_interest }));
+  candleSeries.setData(ohlc);
+  volSeries.setData(vol);
+  oiSeries.setData(oi);
+  chart.timeScale().fitContent();
+  oiChart.timeScale().fitContent();
+  const empty = document.getElementById('chart-empty');
+  if (empty) empty.classList.toggle('hidden', ohlc.length > 1);
+}
+
+function updateCurveSubtitle() {
+  const sub = document.getElementById('curve-sub');
+  if (sub) sub.textContent = `${displayCcy}/t · ICE Liffe C`;
+}
+
+function rerenderForCcy() {
+  updateCurveSubtitle();
+  if (lastCurveRows) {
+    renderCurveTable(lastCurveRows);
+    renderCurveShape(lastCurveRows);
+  }
+  if (lastHistoryData) renderHistoryChart(lastHistoryData);
+}
+
+async function fetchJSON(path) {
+  const r = await fetch(path);
+  if (!r.ok) throw new Error(`${path} → ${r.status}`);
+  return r.json();
+}
+
+async function loadFxRate() {
+  try {
+    const r = await fetch('https://api.frankfurter.app/latest?from=GBP&to=USD');
+    if (!r.ok) return;
+    const data = await r.json();
+    const v = data && data.rates && data.rates.USD;
+    if (typeof v === 'number' && v > 0) {
+      fxRate = v;
+      const input = document.getElementById('fx-rate');
+      if (input) input.value = v.toFixed(4);
+      rerenderForCcy();
+    }
+  } catch (e) {
+    console.warn('FX fetch failed', e);
+  }
+}
+
+function initFxControls() {
+  const input = document.getElementById('fx-rate');
+  const refresh = document.getElementById('fx-refresh');
+  const gbpBtn = document.getElementById('ccy-gbp');
+  const usdBtn = document.getElementById('ccy-usd');
+  if (input) {
+    input.addEventListener('input', () => {
+      const v = parseFloat(input.value);
+      fxRate = Number.isFinite(v) && v > 0 ? v : null;
+      rerenderForCcy();
+    });
+  }
+  if (refresh) refresh.addEventListener('click', loadFxRate);
+  if (gbpBtn) gbpBtn.addEventListener('click', () => setDisplayCcy('GBP'));
+  if (usdBtn) usdBtn.addEventListener('click', () => setDisplayCcy('USD'));
+}
+
+function setDisplayCcy(ccy) {
+  if (ccy !== 'GBP' && ccy !== 'USD') return;
+  displayCcy = ccy;
+  document.getElementById('ccy-gbp').classList.toggle('active', ccy === 'GBP');
+  document.getElementById('ccy-usd').classList.toggle('active', ccy === 'USD');
+  rerenderForCcy();
+}
+
+async function loadCurve() {
+  const data = await fetchJSON('/api/curve');
+  lastUpdateAt = data.as_of;
+  lastCurveRows = data.rows;
+  renderCurveTable(data.rows);
   renderCurveShape(data.rows);
   if (!activeSymbol && data.rows.length) {
     selectContract(data.rows[0].symbol, data.rows[0].contract_month);
@@ -123,27 +219,15 @@ function highlightRow(symbol) {
 
 async function selectContract(symbol, label) {
   activeSymbol = symbol;
+  activeLabel = label;
   highlightRow(symbol);
   document.getElementById('chart-title').textContent = label || symbol;
   document.getElementById('chart-sub').textContent = symbol;
   const empty = document.getElementById('chart-empty');
   try {
     const data = await fetchJSON(`/api/contract/${encodeURIComponent(symbol)}/history`);
-    const ohlc = data.ohlc.filter((r) => r.close != null).map((r) => ({
-      time: r.date,
-      open: r.open ?? r.close,
-      high: r.high ?? r.close,
-      low: r.low ?? r.close,
-      close: r.close,
-    }));
-    const vol = data.ohlc.filter((r) => r.volume != null).map((r) => ({ time: r.date, value: r.volume, color: '#3b4654' }));
-    const oi = data.ohlc.filter((r) => r.open_interest != null).map((r) => ({ time: r.date, value: r.open_interest }));
-    candleSeries.setData(ohlc);
-    volSeries.setData(vol);
-    oiSeries.setData(oi);
-    chart.timeScale().fitContent();
-    oiChart.timeScale().fitContent();
-    if (empty) empty.classList.toggle('hidden', ohlc.length > 1);
+    lastHistoryData = data;
+    renderHistoryChart(data);
   } catch (e) {
     console.warn('history load failed', e);
     if (empty) empty.classList.remove('hidden');
@@ -199,6 +283,9 @@ async function refreshAll() {
 
 window.addEventListener('DOMContentLoaded', () => {
   initCharts();
+  initFxControls();
+  updateCurveSubtitle();
+  loadFxRate();
   refreshAll();
   setInterval(refreshAll, 60_000);
 });
