@@ -13,6 +13,8 @@ from app.storage.models import Contract, CotPositioning, QuoteEod, ScrapeLog
 
 router = APIRouter(prefix="/api")
 
+ACTIVE_SCRAPE_SOURCES = {"investing.intraday", "ice.eod", "cftc.cot"}
+
 
 @router.get("/curve")
 def get_curve() -> Dict[str, Any]:
@@ -101,7 +103,10 @@ def get_positioning(limit: int = 52) -> Dict[str, Any]:
 def get_health() -> Dict[str, Any]:
     with get_session() as session:
         recent = session.exec(
-            select(ScrapeLog).order_by(ScrapeLog.started_at.desc()).limit(20)
+            select(ScrapeLog)
+            .where(ScrapeLog.source.in_(ACTIVE_SCRAPE_SOURCES))
+            .order_by(ScrapeLog.started_at.desc())
+            .limit(20)
         ).all()
         by_source: Dict[str, Dict[str, Any]] = {}
         for log_row in recent:
