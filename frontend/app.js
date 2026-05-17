@@ -224,13 +224,27 @@ function initFxControls() {
   if (usdBtn) usdBtn.addEventListener('click', () => setDisplayCcy('USD'));
 }
 
-function downloadCotCsv() {
-  const a = document.createElement('a');
-  a.href = '/api/positioning.csv';
-  a.download = 'cocoa-cftc.csv';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+async function downloadCotCsv() {
+  const btn = document.getElementById('cot-download');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch('/api/positioning.csv', { cache: 'no-store' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'cocoa-cftc.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (e) {
+    console.error('CSV download failed', e);
+    alert(`Download failed: ${e.message}. Restart uvicorn if /api/positioning.csv was just added.`);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 function setDisplayCcy(ccy) {
