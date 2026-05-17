@@ -121,6 +121,47 @@ tbody tr.active { background: rgba(245, 166, 35, 0.1); }
 
 #chart { width: 100%; height: 360px; }
 #curve-shape { width: 100%; height: 140px; }
+#cot-chart { width: 100%; height: 200px; margin-bottom: 12px; }
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.panel-header h2 { margin: 0; }
+.btn-download {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--fg-dim);
+  padding: 4px 12px;
+  cursor: pointer;
+  border-radius: 2px;
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  text-decoration: none;
+}
+.btn-download:hover { color: var(--accent); border-color: var(--accent); }
+.cot-legend {
+  display: flex;
+  gap: 18px;
+  color: var(--fg-dim);
+  font-size: 11px;
+  margin-bottom: 6px;
+  letter-spacing: 0.05em;
+}
+.legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.legend-item .dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+.dot-mm { background: #f5a623; }
+.dot-comm { background: #3b8a8a; }
 
 .panel.chart { position: relative; }
 .chart-empty {

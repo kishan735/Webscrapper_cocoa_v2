@@ -8,9 +8,12 @@ const colorClass = (v) => (v > 0 ? 'up' : v < 0 ? 'dn' : '');
 
 let chart = null;
 let shapeChart = null;
+let cotChart = null;
 let candleSeries = null;
 let volSeries = null;
 let shapeSeries = null;
+let cotMmSeries = null;
+let cotCommSeries = null;
 let activeSymbol = null;
 let activeLabel = null;
 let lastUpdateAt = null;
@@ -58,6 +61,46 @@ function initCharts() {
     timeScale: { ...common.timeScale, timeVisible: false, secondsVisible: false },
   });
   shapeSeries = shapeChart.addLineSeries({ color: '#f5a623', lineWidth: 2, priceLineVisible: false });
+
+  const cotEl = document.getElementById('cot-chart');
+  if (cotEl) {
+    cotChart = LightweightCharts.createChart(cotEl, {
+      ...common,
+      height: 200,
+      autoSize: true,
+      timeScale: { ...common.timeScale, timeVisible: false, secondsVisible: false },
+    });
+    cotMmSeries = cotChart.addLineSeries({ color: '#f5a623', lineWidth: 2, priceLineVisible: false });
+    cotCommSeries = cotChart.addLineSeries({ color: '#3b8a8a', lineWidth: 2, priceLineVisible: false });
+  }
+}
+
+function isoDateToEpoch(iso) {
+  const d = new Date(iso + 'T00:00:00Z');
+  const t = d.getTime();
+  return Number.isFinite(t) ? Math.floor(t / 1000) : null;
+}
+
+function renderCotChart(rows) {
+  if (!cotMmSeries || !cotCommSeries) return;
+  const ordered = [...rows].sort((a, b) => (a.report_date < b.report_date ? -1 : 1));
+  const mmPts = ordered
+    .map((r) => {
+      const t = isoDateToEpoch(r.report_date);
+      if (t == null || r.mm_long == null || r.mm_short == null) return null;
+      return { time: t, value: r.mm_long - r.mm_short };
+    })
+    .filter(Boolean);
+  const commPts = ordered
+    .map((r) => {
+      const t = isoDateToEpoch(r.report_date);
+      if (t == null || r.commercial_long == null || r.commercial_short == null) return null;
+      return { time: t, value: r.commercial_long - r.commercial_short };
+    })
+    .filter(Boolean);
+  cotMmSeries.setData(mmPts);
+  cotCommSeries.setData(commPts);
+  cotChart.timeScale().fitContent();
 }
 
 function renderCurveTable(rows) {
@@ -227,6 +270,7 @@ async function selectContract(symbol, label) {
 
 async function loadCot() {
   const data = await fetchJSON('/api/positioning');
+  renderCotChart(data.rows);
   const tbody = document.querySelector('#cot-table tbody');
   tbody.innerHTML = '';
   if (!data.rows.length) {

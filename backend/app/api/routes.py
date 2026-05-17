@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import csv
+import io
 from datetime import datetime
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import Response
 from sqlmodel import select
 
 from app.scrapers import cftc, ice, investing
@@ -97,6 +100,51 @@ def get_positioning(limit: int = 52) -> Dict[str, Any]:
                 for r in reversed(rows)
             ]
         }
+
+
+_CSV_COLUMNS = [
+    "report_date",
+    "market",
+    "commercial_long",
+    "commercial_short",
+    "mm_long",
+    "mm_short",
+    "other_long",
+    "other_short",
+    "nonreportable_long",
+    "nonreportable_short",
+    "open_interest_all",
+]
+
+
+@router.get("/positioning.csv")
+def get_positioning_csv() -> Response:
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(_CSV_COLUMNS)
+    with get_session() as session:
+        rows = session.exec(
+            select(CotPositioning).order_by(CotPositioning.report_date.desc())
+        ).all()
+        for r in rows:
+            writer.writerow([
+                r.report_date.isoformat(),
+                r.market,
+                r.commercial_long,
+                r.commercial_short,
+                r.mm_long,
+                r.mm_short,
+                r.other_long,
+                r.other_short,
+                r.nonreportable_long,
+                r.nonreportable_short,
+                r.open_interest_all,
+            ])
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=cocoa-cftc.csv"},
+    )
 
 
 @router.get("/health")

@@ -55,7 +55,15 @@
     </section>
 
     <section class="panel cot">
-      <h2>CFTC Commitments of Traders <span class="sub">(weekly)</span></h2>
+      <div class="panel-header">
+        <h2>CFTC Commitments of Traders <span class="sub">(weekly)</span></h2>
+        <a class="btn-download" href="/api/positioning.csv" download>Download CSV</a>
+      </div>
+      <div class="cot-legend">
+        <span class="legend-item"><span class="dot dot-mm"></span>MM Net</span>
+        <span class="legend-item"><span class="dot dot-comm"></span>Comm Net</span>
+      </div>
+      <div id="cot-chart"></div>
       <table id="cot-table">
         <thead>
           <tr>
