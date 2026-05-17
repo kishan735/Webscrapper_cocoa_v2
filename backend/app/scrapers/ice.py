@@ -11,9 +11,15 @@ renders a server-side HTML table with one row per listed contract
 (`Contract`, `Last`, `Time(GMT)`, `% Change`, `Volume`). That's what we parse.
 
 Open interest is no longer published per-contract on any free public ICE page
-without the SPA dance, so this scraper records the curve without OI. The
-front-month OI is recovered from Investing.com's keyMetrics in the
-intraday scraper and merged into ``QuoteEod.open_interest`` at curve-build time.
+without the SPA dance. The /products/.../data HTML carries only settle +
+volume; OI lives on ``/report/114`` (Preliminary Open Interest - Futures) but
+that page is a JS-rendered SPA that fetches its data from ``/api/sites/ice/
+proxy``. Scraping it is a TODO — would need to either replay the proxy POST
+or render the SPA via the existing scrapling/playwright stack.
+
+For now, the front-month OI is recovered from Investing.com's keyMetrics
+in the intraday scraper (``investing.py``) and backfilled into the matching
+``QuoteEod.open_interest`` row by contract_month.
 """
 from __future__ import annotations
 

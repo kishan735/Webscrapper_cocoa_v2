@@ -27,11 +27,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional
 
+from sqlmodel import select
+
 from app.config import settings
 from app.scrapers._base import scrape_run
 from app.scrapers.contracts import upsert_contract
 from app.storage.db import get_session
-from app.storage.models import QuoteIntraday
+from app.storage.models import Contract, QuoteEod, QuoteIntraday
 
 log = logging.getLogger(__name__)
 
@@ -244,6 +246,35 @@ def run() -> int:
                     change_pct=r.change_pct,
                 ))
                 handle.rows_written += 1
+
+                # Investing.com's keyMetrics only carries OI for the front
+                # month. When we have it, patch the matching ICE EOD row
+                # (different Contract row — same contract_month) so it
+                # surfaces in the curve table and OI sub-chart.
+                if r.open_interest is not None:
+                    eod_contract = session.exec(
+                        select(Contract).where(
+                            Contract.exchange == "ICE_LIFFE",
+                            Contract.contract_month == r.contract_month,
+                            ~Contract.symbol.like("LCCc%"),
+                        )
+                    ).first()
+                    if eod_contract is not None:
+                        latest_eod = session.exec(
+                            select(QuoteEod)
+                            .where(QuoteEod.contract_id == eod_contract.id)
+                            .order_by(QuoteEod.date.desc())
+                            .limit(1)
+                        ).first()
+                        if latest_eod is not None and latest_eod.open_interest != r.open_interest:
+                            latest_eod.open_interest = r.open_interest
+                            session.add(latest_eod)
+                            log.info(
+                                "intraday OI backfill: %s (%s) → %d",
+                                eod_contract.symbol,
+                                r.contract_month,
+                                r.open_interest,
+                            )
             session.flush()  # surface any IntegrityError before the context manager commits silently
         log.info("intraday scrape: %d rows persisted (fetched %d)", handle.rows_written, len(rows))
         return handle.rows_written
