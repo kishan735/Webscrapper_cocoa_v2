@@ -282,15 +282,35 @@ async function loadCot() {
   renderCotChart(data.rows);
 }
 
+async function fetchHealthWithRetry(attempts = 3, backoffMs = 2000) {
+  let lastErr = null;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fetchJSON('/api/health');
+    } catch (e) {
+      lastErr = e;
+      if (i < attempts - 1) await new Promise((res) => setTimeout(res, backoffMs));
+    }
+  }
+  throw lastErr;
+}
+
 async function loadHealth() {
+  const statusEl = document.getElementById('status');
+  if (statusEl) {
+    const cur = statusEl.textContent.trim();
+    if (cur === '' || cur === 'checking…' || cur.includes('unavailable')) {
+      statusEl.textContent = 'checking…';
+    }
+  }
   try {
-    const health = await fetchJSON('/api/health');
+    const health = await fetchHealthWithRetry();
     const parts = Object.entries(health.sources).map(
       ([src, s]) => `${src}: ${s.status}${s.rows_written ? ` (${s.rows_written})` : ''}`
     );
-    document.getElementById('status').textContent = parts.length ? parts.join(' · ') : 'no scrapes yet';
+    if (statusEl) statusEl.textContent = parts.length ? parts.join(' · ') : 'no scrapes yet';
   } catch (e) {
-    document.getElementById('status').textContent = 'health endpoint unavailable';
+    if (statusEl) statusEl.textContent = 'health endpoint unavailable';
   }
   document.getElementById('footer-info').textContent =
     `Last refresh: ${lastUpdateAt ? new Date(lastUpdateAt).toLocaleTimeString() : '—'} · Data: ICE Liffe C · ` +
