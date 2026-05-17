@@ -48,6 +48,7 @@ main {
 
 h2 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--fg-dim); font-weight: 600; }
 h2 .sub { color: var(--fg-dim); font-weight: 400; margin-left: 8px; }
+h3.subhead { margin: 18px 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--fg-dim); font-weight: 600; }
 
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 5px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
@@ -64,6 +65,31 @@ tbody tr.active { background: rgba(245, 166, 35, 0.1); }
 
 #chart { width: 100%; height: 360px; }
 #oi-chart { width: 100%; height: 120px; margin-top: 6px; }
+#curve-shape { width: 100%; height: 140px; }
+
+.panel.chart { position: relative; }
+.chart-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 0 24px;
+  text-align: center;
+  color: var(--fg-dim);
+  font-style: italic;
+  background: rgba(22, 28, 36, 0.88);
+  pointer-events: none;
+}
+.chart-empty.hidden { display: none; }
+
+tr.hint td {
+  color: var(--fg-dim);
+  font-style: italic;
+  text-align: center;
+  padding: 10px;
+  cursor: default;
+}
+tr.hint:hover { background: transparent; }
 
 .empty {
   text-align: center;

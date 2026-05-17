@@ -15,7 +15,7 @@
 
   <main>
     <section class="panel curve">
-      <h2>Forward curve</h2>
+      <h2>Forward curve <span class="sub">GBP/t · ICE Liffe C</span></h2>
       <table id="curve-table">
         <thead>
           <tr>
@@ -31,6 +31,8 @@
         </thead>
         <tbody></tbody>
       </table>
+      <h3 class="subhead">Curve shape</h3>
+      <div id="curve-shape"></div>
     </section>
 
     <section class="panel chart">
@@ -40,6 +42,7 @@
       </h2>
       <div id="chart"></div>
       <div id="oi-chart"></div>
+      <div id="chart-empty" class="chart-empty hidden">Single observation today — full OHLC history builds with each EOD scrape (~19:30 London).</div>
     </section>
 
     <section class="panel cot">

@@ -8,11 +8,21 @@ const colorClass = (v) => (v > 0 ? 'up' : v < 0 ? 'dn' : '');
 
 let chart = null;
 let oiChart = null;
+let shapeChart = null;
 let candleSeries = null;
 let volSeries = null;
 let oiSeries = null;
+let shapeSeries = null;
 let activeSymbol = null;
 let lastUpdateAt = null;
+
+const MONTHS = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
+
+function contractMonthToEpoch(label) {
+  const m = /^([A-Za-z]{3})\s+(\d{4})$/.exec((label || '').trim());
+  if (!m || !(m[1] in MONTHS)) return null;
+  return Math.floor(Date.UTC(parseInt(m[2], 10), MONTHS[m[1]], 15) / 1000);
+}
 
 function initCharts() {
   const chartEl = document.getElementById('chart');
@@ -34,6 +44,29 @@ function initCharts() {
   chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
     if (range) oiChart.timeScale().setVisibleLogicalRange(range);
   });
+
+  const shapeEl = document.getElementById('curve-shape');
+  shapeChart = LightweightCharts.createChart(shapeEl, {
+    ...common,
+    height: 140,
+    autoSize: true,
+    timeScale: { ...common.timeScale, timeVisible: false, secondsVisible: false },
+  });
+  shapeSeries = shapeChart.addLineSeries({ color: '#f5a623', lineWidth: 2, priceLineVisible: false });
+}
+
+function renderCurveShape(rows) {
+  if (!shapeSeries) return;
+  const points = rows
+    .map((r) => {
+      const t = contractMonthToEpoch(r.contract_month);
+      const v = r.settle ?? r.last;
+      return t != null && v != null ? { time: t, value: Number(v) } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.time - b.time);
+  shapeSeries.setData(points);
+  shapeChart.timeScale().fitContent();
 }
 
 async function fetchJSON(path) {
@@ -68,6 +101,13 @@ async function loadCurve() {
     tr.addEventListener('click', () => selectContract(r.symbol, r.contract_month));
     tbody.appendChild(tr);
   }
+  if (data.rows.every((r) => r.change == null)) {
+    const hint = document.createElement('tr');
+    hint.className = 'hint';
+    hint.innerHTML = '<td colspan="8">Change vs prior settle populates after the next EOD scrape (~19:30 London).</td>';
+    tbody.appendChild(hint);
+  }
+  renderCurveShape(data.rows);
   if (!activeSymbol && data.rows.length) {
     selectContract(data.rows[0].symbol, data.rows[0].contract_month);
   } else if (activeSymbol) {
@@ -86,6 +126,7 @@ async function selectContract(symbol, label) {
   highlightRow(symbol);
   document.getElementById('chart-title').textContent = label || symbol;
   document.getElementById('chart-sub').textContent = symbol;
+  const empty = document.getElementById('chart-empty');
   try {
     const data = await fetchJSON(`/api/contract/${encodeURIComponent(symbol)}/history`);
     const ohlc = data.ohlc.filter((r) => r.close != null).map((r) => ({
@@ -102,8 +143,10 @@ async function selectContract(symbol, label) {
     oiSeries.setData(oi);
     chart.timeScale().fitContent();
     oiChart.timeScale().fitContent();
+    if (empty) empty.classList.toggle('hidden', ohlc.length > 1);
   } catch (e) {
     console.warn('history load failed', e);
+    if (empty) empty.classList.remove('hidden');
   }
 }
 
