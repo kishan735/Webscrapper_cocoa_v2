@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 from sqlmodel import select
 
-from app.scrapers import cftc, ice, investing
+from app.scrapers import cftc, ice, investing, yfinance_backfill
 from app.services import curve as curve_service
 from app.storage.db import get_session
 from app.storage.models import Contract, CotPositioning, QuoteEod, ScrapeLog
@@ -177,6 +177,7 @@ def admin_run(source: str) -> Dict[str, Any]:
         "intraday": investing.run,
         "ice": ice.run,
         "cftc": cftc.run,
+        "backfill": yfinance_backfill.run,
     }
     runner = runners.get(source)
     if not runner:

@@ -12,7 +12,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.config import settings
-from app.scrapers import cftc, ice, investing
+from app.scrapers import cftc, ice, investing, yfinance_backfill
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +60,14 @@ def start() -> BackgroundScheduler:
     sch.start()
     _scheduler = sch
     log.info("scheduler started")
+
+    try:
+        written = yfinance_backfill.backfill_if_empty()
+        if written:
+            log.info("startup yfinance backfill: %d rows", written)
+    except Exception as e:  # noqa: BLE001
+        log.warning("startup yfinance backfill failed: %s", e)
+
     return sch
 
 
