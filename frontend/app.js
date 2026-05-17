@@ -1,306 +1,427 @@
-// API Configuration - UPDATE THIS WITH YOUR RAILWAY URL
-const API_BASE_URL = 'https://web-production-c9ed9.up.railway.app';
-
-// Current currency (updated dynamically from API)
-let currentCurrency = 'USD';
-let currencySymbol = '$';
-
-// DOM Elements
-const elements = {
-    currentPrice: document.getElementById('currentPrice'),
-    priceChange: document.getElementById('priceChange'),
-    openPrice: document.getElementById('openPrice'),
-    dayHigh: document.getElementById('dayHigh'),
-    dayLow: document.getElementById('dayLow'),
-    prevClose: document.getElementById('prevClose'),
-    week52High: document.getElementById('week52High'),
-    week52Low: document.getElementById('week52Low'),
-    pricePosition: document.getElementById('pricePosition'),
-    ma50: document.getElementById('ma50'),
-    ma200: document.getElementById('ma200'),
-    change1w: document.getElementById('change1w'),
-    change1m: document.getElementById('change1m'),
-    change3m: document.getElementById('change3m'),
-    change6m: document.getElementById('change6m'),
-    change1y: document.getElementById('change1y'),
-    marketOverview: document.getElementById('marketOverview'),
-    marketOutlook: document.getElementById('marketOutlook'),
-    keyFactorsSection: document.getElementById('keyFactorsSection'),
-    keyFactors: document.getElementById('keyFactors'),
-    newsList: document.getElementById('newsList'),
-    newsCount: document.getElementById('newsCount'),
-    lastUpdated: document.getElementById('lastUpdated'),
-    refreshIcon: document.getElementById('refreshIcon'),
-    currencyUnit: document.getElementById('currencyUnit'),
+const fmtNum = (v, dp = 2) => {
+  if (v === null || v === undefined || Number.isNaN(v)) return '—';
+  return Number(v).toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp });
 };
+const fmtInt = (v) => (v === null || v === undefined ? '—' : Number(v).toLocaleString());
+const fmtPct = (v) => (v === null || v === undefined ? '—' : `${v > 0 ? '+' : ''}${Number(v).toFixed(2)}%`);
+const colorClass = (v) => (v > 0 ? 'up' : v < 0 ? 'dn' : '');
 
-// Utility Functions
-function formatPrice(price) {
-    if (!price) return '--';
-    const locale = currentCurrency === 'GBP' ? 'en-GB' : 'en-US';
-    return `${currencySymbol}${price.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+let chart = null;
+let oiChart = null;
+let shapeChart = null;
+let cotChart = null;
+let candleSeries = null;
+let volSeries = null;
+let oiSeries = null;
+let shapeSeries = null;
+let cotLongSeries = null;
+let cotShortSeries = null;
+let cotNetSeries = null;
+let cotOiSeries = null;
+let activeSymbol = null;
+let activeLabel = null;
+let lastUpdateAt = null;
+
+let fxRate = null;
+let displayCcy = 'GBP';
+let chartTimeframe = 'D';
+let chartSeries = 'continuous';
+let lastCurveRows = null;
+let lastHistoryData = null;
+
+const MONTHS = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
+
+function contractMonthToEpoch(label) {
+  const m = /^([A-Za-z]{3})\s+(\d{4})$/.exec((label || '').trim());
+  if (!m || !(m[1] in MONTHS)) return null;
+  return Math.floor(Date.UTC(parseInt(m[2], 10), MONTHS[m[1]], 15) / 1000);
 }
 
-function formatChange(change) {
-    if (change === null || change === undefined) return '--';
-    const sign = change >= 0 ? '+' : '';
-    return `${sign}${change.toFixed(2)}%`;
+function convertPrice(v) {
+  if (v == null || Number.isNaN(v)) return v;
+  return displayCcy === 'USD' && fxRate ? v * fxRate : v;
 }
 
-function getChangeColor(change) {
-    if (change === null || change === undefined) return 'text-gray-500';
-    return change >= 0 ? 'text-green-600' : 'text-red-600';
+function initCharts() {
+  const chartEl = document.getElementById('chart');
+  const common = {
+    layout: { background: { color: '#161c24' }, textColor: '#8a95a3' },
+    grid: { vertLines: { color: '#1a2129' }, horzLines: { color: '#1a2129' } },
+    rightPriceScale: { borderColor: '#1f2832' },
+    timeScale: { borderColor: '#1f2832', timeVisible: false },
+  };
+  chart = LightweightCharts.createChart(chartEl, { ...common, height: 280, autoSize: true });
+  candleSeries = chart.addCandlestickSeries({ upColor: '#2ecc71', downColor: '#e74c3c', borderVisible: false, wickUpColor: '#2ecc71', wickDownColor: '#e74c3c' });
+  volSeries = chart.addHistogramSeries({
+    color: '#3b4654',
+    priceFormat: { type: 'volume' },
+    priceScaleId: 'volume',
+  });
+  chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.75, bottom: 0 } });
+
+  const oiEl = document.getElementById('oi-chart');
+  if (oiEl) {
+    oiChart = LightweightCharts.createChart(oiEl, {
+      ...common,
+      height: 110,
+      autoSize: true,
+      timeScale: { ...common.timeScale, timeVisible: false, secondsVisible: false },
+    });
+    oiSeries = oiChart.addLineSeries({ color: '#f5a623', lineWidth: 2, priceLineVisible: false });
+    chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+      if (range && oiChart) oiChart.timeScale().setVisibleLogicalRange(range);
+    });
+  }
+
+  const shapeEl = document.getElementById('curve-shape');
+  shapeChart = LightweightCharts.createChart(shapeEl, {
+    ...common,
+    height: 140,
+    autoSize: true,
+    timeScale: { ...common.timeScale, timeVisible: false, secondsVisible: false },
+  });
+  shapeSeries = shapeChart.addLineSeries({ color: '#f5a623', lineWidth: 2, priceLineVisible: false });
+
+  const cotEl = document.getElementById('cot-chart');
+  if (cotEl) {
+    cotChart = LightweightCharts.createChart(cotEl, {
+      ...common,
+      height: 220,
+      autoSize: true,
+      timeScale: { ...common.timeScale, timeVisible: false, secondsVisible: false },
+      leftPriceScale: { visible: true, borderColor: '#1f2832' },
+      rightPriceScale: { visible: true, borderColor: '#1f2832' },
+    });
+    cotLongSeries = cotChart.addLineSeries({ color: '#2ecc71', lineWidth: 2, priceLineVisible: false, priceScaleId: 'left' });
+    cotShortSeries = cotChart.addLineSeries({ color: '#e74c3c', lineWidth: 2, priceLineVisible: false, priceScaleId: 'left' });
+    cotNetSeries = cotChart.addLineSeries({ color: '#d7dde6', lineWidth: 2, priceLineVisible: false, priceScaleId: 'left' });
+    cotOiSeries = cotChart.addLineSeries({ color: '#f5a623', lineWidth: 2, priceLineVisible: false, priceScaleId: 'right' });
+  }
 }
 
-function formatDate(dateStr) {
-    if (!dateStr) return '';
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+function isoDateToEpoch(iso) {
+  const d = new Date(iso + 'T00:00:00Z');
+  const t = d.getTime();
+  return Number.isFinite(t) ? Math.floor(t / 1000) : null;
 }
 
-function timeAgo(dateStr) {
-    if (!dateStr) return '';
-    const date = new Date(dateStr);
-    const now = new Date();
-    const seconds = Math.floor((now - date) / 1000);
-
-    if (seconds < 60) return 'Just now';
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-    return `${Math.floor(seconds / 86400)}d ago`;
+function renderCotChart(rows) {
+  if (!cotLongSeries || !cotShortSeries || !cotNetSeries || !cotOiSeries) return;
+  const ordered = [...rows].sort((a, b) => (a.report_date < b.report_date ? -1 : 1));
+  const longPts = [];
+  const shortPts = [];
+  const netPts = [];
+  const oiPts = [];
+  for (const r of ordered) {
+    const t = isoDateToEpoch(r.report_date);
+    if (t == null) continue;
+    if (r.commercial_long != null) longPts.push({ time: t, value: r.commercial_long });
+    if (r.commercial_short != null) shortPts.push({ time: t, value: r.commercial_short });
+    if (r.commercial_long != null && r.commercial_short != null) {
+      netPts.push({ time: t, value: r.commercial_long - r.commercial_short });
+    }
+    if (r.open_interest_all != null) oiPts.push({ time: t, value: r.open_interest_all });
+  }
+  cotLongSeries.setData(longPts);
+  cotShortSeries.setData(shortPts);
+  cotNetSeries.setData(netPts);
+  cotOiSeries.setData(oiPts);
+  cotChart.timeScale().fitContent();
 }
 
-// API Functions
-async function fetchData(endpoint) {
+function renderCurveTable(rows) {
+  const tbody = document.querySelector('#curve-table tbody');
+  tbody.innerHTML = '';
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="empty">No contracts yet — scrapers running. Try POST /api/admin/run/ice or /api/admin/run/intraday.</td></tr>';
+    return;
+  }
+  for (const r of rows) {
+    const tr = document.createElement('tr');
+    tr.dataset.symbol = r.symbol;
+    const chgCls = colorClass(r.change ?? 0);
+    const last = convertPrice(r.last);
+    const settle = convertPrice(r.settle);
+    const change = convertPrice(r.change);
+    tr.innerHTML = `
+      <td class="sym">${r.contract_month}</td>
+      <td class="num">${fmtNum(last)}</td>
+      <td class="num">${fmtNum(settle)}</td>
+      <td class="num ${chgCls}">${change == null ? '—' : (change > 0 ? '+' : '') + fmtNum(change)}</td>
+      <td class="num ${chgCls}">${fmtPct(r.change_pct)}</td>
+      <td class="num">${fmtInt(r.volume)}</td>
+      <td class="num">${fmtInt(r.open_interest)}</td>
+      <td class="ts">${r.updated_at ? new Date(r.updated_at).toLocaleString() : '—'}</td>
+    `;
+    tr.addEventListener('click', () => selectContract(r.symbol, r.contract_month));
+    tbody.appendChild(tr);
+  }
+  if (rows.every((r) => r.change == null)) {
+    const hint = document.createElement('tr');
+    hint.className = 'hint';
+    hint.innerHTML = '<td colspan="8">Change vs prior settle populates after the next EOD scrape (~19:30 London).</td>';
+    tbody.appendChild(hint);
+  }
+  if (activeSymbol) highlightRow(activeSymbol);
+}
+
+function renderCurveShape(rows) {
+  if (!shapeSeries) return;
+  const points = rows
+    .map((r) => {
+      const t = contractMonthToEpoch(r.contract_month);
+      const raw = r.settle ?? r.last;
+      const v = convertPrice(raw);
+      return t != null && v != null ? { time: t, value: Number(v) } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.time - b.time);
+  shapeSeries.setData(points);
+  shapeChart.timeScale().fitContent();
+}
+
+function renderHistoryChart(data) {
+  const rows = (data && data.ohlc) || [];
+  const ohlc = rows.filter((r) => r.close != null).map((r) => ({
+    time: r.date,
+    open: convertPrice(r.open ?? r.close),
+    high: convertPrice(r.high ?? r.close),
+    low: convertPrice(r.low ?? r.close),
+    close: convertPrice(r.close),
+  }));
+  const vol = rows.filter((r) => r.volume != null).map((r) => ({ time: r.date, value: r.volume, color: '#3b4654' }));
+  const oi = rows.filter((r) => r.open_interest != null).map((r) => ({ time: r.date, value: r.open_interest }));
+  candleSeries.setData(ohlc);
+  volSeries.setData(vol);
+  if (oiSeries) oiSeries.setData(oi);
+  chart.timeScale().fitContent();
+  if (oiChart) oiChart.timeScale().fitContent();
+
+  const empty = document.getElementById('chart-empty');
+  if (empty) empty.classList.toggle('hidden', ohlc.length > 1);
+
+  const noteEl = document.getElementById('chart-note');
+  if (noteEl) {
+    const parts = [];
+    if (data && data.series_label) parts.push(`Source: ${data.series_label}`);
+    if (oi.length === 0 && ohlc.length > 0) parts.push('OI: no source yet (yfinance feed has no OI; ICE extraction pending)');
+    if (data && data.note) parts.push(data.note);
+    noteEl.textContent = parts.join(' · ');
+  }
+}
+
+function updateCurveSubtitle() {
+  const sub = document.getElementById('curve-sub');
+  if (sub) sub.textContent = `${displayCcy}/t · ICE Liffe C`;
+}
+
+function rerenderForCcy() {
+  updateCurveSubtitle();
+  if (lastCurveRows) {
+    renderCurveTable(lastCurveRows);
+    renderCurveShape(lastCurveRows);
+  }
+  if (lastHistoryData) renderHistoryChart(lastHistoryData);
+}
+
+async function fetchJSON(path) {
+  const r = await fetch(path);
+  if (!r.ok) throw new Error(`${path} → ${r.status}`);
+  return r.json();
+}
+
+async function loadFxRate() {
+  try {
+    const r = await fetch('https://api.frankfurter.dev/v1/latest?from=GBP&to=USD');
+    if (!r.ok) return;
+    const data = await r.json();
+    const v = data && data.rates && data.rates.USD;
+    if (typeof v === 'number' && v > 0) {
+      fxRate = v;
+      const input = document.getElementById('fx-rate');
+      if (input) input.value = v.toFixed(4);
+      rerenderForCcy();
+    }
+  } catch (e) {
+    console.warn('FX fetch failed', e);
+  }
+}
+
+function initFxControls() {
+  const input = document.getElementById('fx-rate');
+  const refresh = document.getElementById('fx-refresh');
+  const gbpBtn = document.getElementById('ccy-gbp');
+  const usdBtn = document.getElementById('ccy-usd');
+  if (input) {
+    input.addEventListener('input', () => {
+      const v = parseFloat(input.value);
+      fxRate = Number.isFinite(v) && v > 0 ? v : null;
+      rerenderForCcy();
+    });
+  }
+  if (refresh) refresh.addEventListener('click', loadFxRate);
+  if (gbpBtn) gbpBtn.addEventListener('click', () => setDisplayCcy('GBP'));
+  if (usdBtn) usdBtn.addEventListener('click', () => setDisplayCcy('USD'));
+}
+
+async function downloadCotCsv() {
+  const btn = document.getElementById('cot-download');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch('/api/positioning.csv', { cache: 'no-store' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'cocoa-cftc.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (e) {
+    console.error('CSV download failed', e);
+    alert(`Download failed: ${e.message}. Restart uvicorn if /api/positioning.csv was just added.`);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function setDisplayCcy(ccy) {
+  if (ccy !== 'GBP' && ccy !== 'USD') return;
+  displayCcy = ccy;
+  document.getElementById('ccy-gbp').classList.toggle('active', ccy === 'GBP');
+  document.getElementById('ccy-usd').classList.toggle('active', ccy === 'USD');
+  rerenderForCcy();
+}
+
+async function loadCurve() {
+  const data = await fetchJSON('/api/curve');
+  lastUpdateAt = data.as_of;
+  lastCurveRows = data.rows;
+  renderCurveTable(data.rows);
+  renderCurveShape(data.rows);
+  if (!activeSymbol && data.rows.length) {
+    selectContract(data.rows[0].symbol, data.rows[0].contract_month);
+  } else if (activeSymbol) {
+    highlightRow(activeSymbol);
+  }
+}
+
+function highlightRow(symbol) {
+  document.querySelectorAll('#curve-table tbody tr').forEach((tr) => {
+    tr.classList.toggle('active', tr.dataset.symbol === symbol);
+  });
+}
+
+async function loadHistory() {
+  if (!activeSymbol) return;
+  const empty = document.getElementById('chart-empty');
+  const params = new URLSearchParams({ series: chartSeries, tf: chartTimeframe });
+  try {
+    const data = await fetchJSON(`/api/contract/${encodeURIComponent(activeSymbol)}/history?${params.toString()}`);
+    lastHistoryData = data;
+    renderHistoryChart(data);
+  } catch (e) {
+    console.warn('history load failed', e);
+    if (empty) empty.classList.remove('hidden');
+  }
+}
+
+async function selectContract(symbol, label) {
+  activeSymbol = symbol;
+  activeLabel = label;
+  highlightRow(symbol);
+  document.getElementById('chart-title').textContent = label || symbol;
+  document.getElementById('chart-sub').textContent = symbol;
+  await loadHistory();
+}
+
+function setChartTimeframe(tf) {
+  if (!['D', 'W', 'M'].includes(tf)) return;
+  chartTimeframe = tf;
+  document.querySelectorAll('.tf-toggle button').forEach((b) => {
+    b.classList.toggle('active', b.dataset.tf === tf);
+  });
+  loadHistory();
+}
+
+function setChartSeries(series) {
+  if (!['this', 'continuous'].includes(series)) return;
+  chartSeries = series;
+  const cont = document.getElementById('series-continuous');
+  const ths = document.getElementById('series-this');
+  if (cont) cont.classList.toggle('active', series === 'continuous');
+  if (ths) ths.classList.toggle('active', series === 'this');
+  loadHistory();
+}
+
+function initChartControls() {
+  document.querySelectorAll('.tf-toggle button').forEach((b) => {
+    b.addEventListener('click', () => setChartTimeframe(b.dataset.tf));
+  });
+  const cont = document.getElementById('series-continuous');
+  const ths = document.getElementById('series-this');
+  if (cont) cont.addEventListener('click', () => setChartSeries('continuous'));
+  if (ths) ths.addEventListener('click', () => setChartSeries('this'));
+}
+
+async function loadCot() {
+  const data = await fetchJSON('/api/positioning');
+  renderCotChart(data.rows);
+}
+
+async function fetchHealthWithRetry(attempts = 3, backoffMs = 2000) {
+  let lastErr = null;
+  for (let i = 0; i < attempts; i++) {
     try {
-        const response = await fetch(`${API_BASE_URL}${endpoint}`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return await response.json();
-    } catch (error) {
-        console.error(`Error fetching ${endpoint}:`, error);
-        return null;
+      return await fetchJSON('/api/health');
+    } catch (e) {
+      lastErr = e;
+      if (i < attempts - 1) await new Promise((res) => setTimeout(res, backoffMs));
     }
+  }
+  throw lastErr;
 }
 
-// Update Functions
-function updatePrice(data) {
-    if (!data) return;
-
-    // Update currency from API response
-    currentCurrency = data.currency || 'USD';
-    currencySymbol = currentCurrency === 'GBP' ? '£' : '$';
-
-    // Update currency display in header
-    if (elements.currencyUnit) {
-        elements.currencyUnit.textContent = `${currentCurrency}/${data.unit || 'MT'}`;
+async function loadHealth() {
+  const statusEl = document.getElementById('status');
+  if (statusEl) {
+    const cur = statusEl.textContent.trim();
+    if (cur === '' || cur === 'checking…' || cur.includes('unavailable')) {
+      statusEl.textContent = 'checking…';
     }
-
-    elements.currentPrice.textContent = formatPrice(data.current_price).replace(currencySymbol, '');
-    elements.currentPrice.classList.remove('loading-pulse');
-
-    const changeHtml = `
-        <span class="text-2xl font-semibold ${getChangeColor(data.change_percent)}">
-            ${formatChange(data.change_percent)}
-        </span>
-        <p class="text-sm ${getChangeColor(data.change_amount)}">
-            ${data.change_amount >= 0 ? '+' : ''}${data.change_amount?.toFixed(2) || '--'}
-        </p>
-    `;
-    elements.priceChange.innerHTML = changeHtml;
-
-    elements.openPrice.textContent = formatPrice(data.open_price);
-    elements.dayHigh.textContent = formatPrice(data.day_high);
-    elements.dayLow.textContent = formatPrice(data.day_low);
-    elements.prevClose.textContent = formatPrice(data.previous_close);
+  }
+  try {
+    const health = await fetchHealthWithRetry();
+    const parts = Object.entries(health.sources).map(
+      ([src, s]) => `${src}: ${s.status}${s.rows_written ? ` (${s.rows_written})` : ''}`
+    );
+    if (statusEl) statusEl.textContent = parts.length ? parts.join(' · ') : 'no scrapes yet';
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'health endpoint unavailable';
+  }
+  document.getElementById('footer-info').textContent =
+    `Last refresh: ${lastUpdateAt ? new Date(lastUpdateAt).toLocaleTimeString() : '—'} · Data: ICE Liffe C · ` +
+    `Scrapers: intraday 5min · EOD 19:30 London · COT Fri 21:00 London`;
 }
 
-function updateTechnical(data) {
-    if (!data) return;
-
-    elements.week52High.textContent = formatPrice(data.week_52_high);
-    elements.week52Low.textContent = formatPrice(data.week_52_low);
-    elements.ma50.textContent = data.moving_avg_50 ? formatPrice(data.moving_avg_50) : 'N/A';
-    elements.ma200.textContent = data.moving_avg_200 ? formatPrice(data.moving_avg_200) : 'N/A';
-
-    // Update price position indicator
-    if (data.price_vs_52_high_percent) {
-        const position = data.price_vs_52_high_percent;
-        elements.pricePosition.style.left = `${position}%`;
-    }
+async function refreshAll() {
+  try {
+    await Promise.all([loadCurve(), loadCot(), loadHealth()]);
+  } catch (e) {
+    console.error(e);
+  }
 }
 
-function updateComparison(data) {
-    if (!data) return;
-
-    const updateChangeEl = (el, change) => {
-        el.textContent = formatChange(change);
-        el.className = `text-lg font-semibold ${getChangeColor(change)}`;
-    };
-
-    updateChangeEl(elements.change1w, data.change_1_week);
-    updateChangeEl(elements.change1m, data.change_1_month);
-    updateChangeEl(elements.change3m, data.change_3_months);
-    updateChangeEl(elements.change6m, data.change_6_months);
-    updateChangeEl(elements.change1y, data.change_1_year);
-}
-
-function updateMarketOverview(data) {
-    if (!data) {
-        elements.marketOverview.innerHTML = '<p class="text-gray-500">Unable to load market overview</p>';
-        return;
-    }
-
-    let html = `<p class="text-gray-700 leading-relaxed">${data.summary}</p>`;
-
-    if (data.key_factors && data.key_factors.length > 0) {
-        elements.keyFactorsSection.classList.remove('hidden');
-        elements.keyFactors.innerHTML = data.key_factors.map(factor =>
-            `<span class="px-3 py-1 bg-cocoa-100 text-cocoa-800 rounded-full text-sm">${factor}</span>`
-        ).join('');
-    }
-
-    if (data.supply_conditions) {
-        html += `
-            <div class="mt-4 p-3 bg-blue-50 rounded-lg">
-                <p class="text-sm font-medium text-blue-800">Supply</p>
-                <p class="text-sm text-blue-700">${data.supply_conditions}</p>
-            </div>
-        `;
-    }
-
-    if (data.demand_conditions) {
-        html += `
-            <div class="mt-2 p-3 bg-purple-50 rounded-lg">
-                <p class="text-sm font-medium text-purple-800">Demand</p>
-                <p class="text-sm text-purple-700">${data.demand_conditions}</p>
-            </div>
-        `;
-    }
-
-    elements.marketOverview.innerHTML = html;
-    elements.marketOverview.classList.add('fade-in');
-}
-
-function updateMarketOutlook(data) {
-    if (!data) {
-        elements.marketOutlook.innerHTML = '<p class="text-gray-500">Unable to load market outlook</p>';
-        return;
-    }
-
-    let html = `
-        <div class="space-y-3">
-            <div>
-                <p class="text-xs font-medium text-gray-500 uppercase tracking-wide">Short Term (1-4 weeks)</p>
-                <p class="text-gray-700">${data.short_term_outlook}</p>
-            </div>
-            <div>
-                <p class="text-xs font-medium text-gray-500 uppercase tracking-wide">Medium Term (1-3 months)</p>
-                <p class="text-gray-700">${data.medium_term_outlook}</p>
-            </div>
-    `;
-
-    if (data.trends_to_watch && data.trends_to_watch.length > 0) {
-        html += `
-            <div class="pt-3 border-t border-gray-100">
-                <p class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Trends to Watch</p>
-                <ul class="space-y-1">
-                    ${data.trends_to_watch.map(trend =>
-                        `<li class="text-sm text-gray-600 flex items-start">
-                            <span class="text-cocoa-500 mr-2">•</span>${trend}
-                        </li>`
-                    ).join('')}
-                </ul>
-            </div>
-        `;
-    }
-
-    html += '</div>';
-    elements.marketOutlook.innerHTML = html;
-    elements.marketOutlook.classList.add('fade-in');
-}
-
-function updateNews(articles) {
-    if (!articles || articles.length === 0) {
-        elements.newsList.innerHTML = '<p class="text-gray-500">No news available</p>';
-        return;
-    }
-
-    elements.newsCount.textContent = `${articles.length} articles`;
-
-    const html = articles.slice(0, 10).map(article => {
-        const sentimentBadge = article.sentiment ?
-            `<span class="px-2 py-0.5 text-xs rounded ${
-                article.sentiment === 'positive' ? 'bg-green-100 text-green-700' :
-                article.sentiment === 'negative' ? 'bg-red-100 text-red-700' :
-                'bg-gray-100 text-gray-700'
-            }">${article.sentiment}</span>` : '';
-
-        const importanceBar = article.importance_score ?
-            `<div class="w-16 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                <div class="h-full bg-cocoa-500 rounded-full" style="width: ${article.importance_score * 100}%"></div>
-            </div>` : '';
-
-        return `
-            <a href="${article.url}" target="_blank" rel="noopener noreferrer"
-               class="block border-b border-gray-100 pb-4 hover:bg-gray-50 -mx-2 px-2 py-2 rounded-lg transition-colors">
-                <div class="flex items-start justify-between gap-4">
-                    <div class="flex-1 min-w-0">
-                        <h3 class="text-sm font-medium text-gray-900 line-clamp-2 hover:text-cocoa-700">
-                            ${article.title}
-                        </h3>
-                        ${article.summary ? `<p class="text-xs text-gray-500 mt-1 line-clamp-2">${article.summary}</p>` : ''}
-                        <div class="flex items-center gap-3 mt-2">
-                            <span class="text-xs text-gray-400">${article.source}</span>
-                            <span class="text-xs text-gray-400">${timeAgo(article.published_date)}</span>
-                            ${sentimentBadge}
-                        </div>
-                    </div>
-                    <div class="flex flex-col items-end gap-1">
-                        ${importanceBar}
-                    </div>
-                </div>
-            </a>
-        `;
-    }).join('');
-
-    elements.newsList.innerHTML = html;
-    elements.newsList.classList.add('fade-in');
-}
-
-// Main refresh function
-async function refreshData() {
-    // Add spinning animation to refresh icon
-    elements.refreshIcon.classList.add('animate-spin');
-
-    // Fetch all data in parallel
-    const [price, technical, comparison, overview, outlook, news] = await Promise.all([
-        fetchData('/api/v1/price'),
-        fetchData('/api/v1/price/technical'),
-        fetchData('/api/v1/price/comparison'),
-        fetchData('/api/v1/market/overview'),
-        fetchData('/api/v1/market/outlook'),
-        fetchData('/api/v1/news?limit=10'),
-    ]);
-
-    // Update UI
-    updatePrice(price);
-    updateTechnical(technical);
-    updateComparison(comparison);
-    updateMarketOverview(overview);
-    updateMarketOutlook(outlook);
-    updateNews(news);
-
-    // Update last updated time
-    elements.lastUpdated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
-
-    // Remove spinning animation
-    elements.refreshIcon.classList.remove('animate-spin');
-}
-
-// Initialize
-document.addEventListener('DOMContentLoaded', () => {
-    refreshData();
-
-    // Auto-refresh every 5 minutes
-    setInterval(refreshData, 5 * 60 * 1000);
+window.addEventListener('DOMContentLoaded', () => {
+  initCharts();
+  initFxControls();
+  initChartControls();
+  updateCurveSubtitle();
+  const dlBtn = document.getElementById('cot-download');
+  if (dlBtn) dlBtn.addEventListener('click', downloadCotCsv);
+  loadFxRate();
+  refreshAll();
+  setInterval(refreshAll, 60_000);
 });
