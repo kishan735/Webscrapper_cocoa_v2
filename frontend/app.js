@@ -7,11 +7,9 @@ const fmtPct = (v) => (v === null || v === undefined ? '—' : `${v > 0 ? '+' : 
 const colorClass = (v) => (v > 0 ? 'up' : v < 0 ? 'dn' : '');
 
 let chart = null;
-let oiChart = null;
 let shapeChart = null;
 let candleSeries = null;
 let volSeries = null;
-let oiSeries = null;
 let shapeSeries = null;
 let activeSymbol = null;
 let activeLabel = null;
@@ -37,7 +35,6 @@ function convertPrice(v) {
 
 function initCharts() {
   const chartEl = document.getElementById('chart');
-  const oiEl = document.getElementById('oi-chart');
   const common = {
     layout: { background: { color: '#161c24' }, textColor: '#8a95a3' },
     grid: { vertLines: { color: '#1a2129' }, horzLines: { color: '#1a2129' } },
@@ -46,15 +43,12 @@ function initCharts() {
   };
   chart = LightweightCharts.createChart(chartEl, { ...common, height: 360, autoSize: true });
   candleSeries = chart.addCandlestickSeries({ upColor: '#2ecc71', downColor: '#e74c3c', borderVisible: false, wickUpColor: '#2ecc71', wickDownColor: '#e74c3c' });
-  volSeries = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: 'volume', color: '#3b4654' });
-  chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
-
-  oiChart = LightweightCharts.createChart(oiEl, { ...common, height: 120, autoSize: true });
-  oiSeries = oiChart.addHistogramSeries({ color: '#f5a623', priceFormat: { type: 'volume' } });
-
-  chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
-    if (range) oiChart.timeScale().setVisibleLogicalRange(range);
+  volSeries = chart.addHistogramSeries({
+    color: '#3b4654',
+    priceFormat: { type: 'volume' },
+    priceScaleId: 'volume',
   });
+  chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
 
   const shapeEl = document.getElementById('curve-shape');
   shapeChart = LightweightCharts.createChart(shapeEl, {
@@ -126,12 +120,9 @@ function renderHistoryChart(data) {
     close: convertPrice(r.close),
   }));
   const vol = data.ohlc.filter((r) => r.volume != null).map((r) => ({ time: r.date, value: r.volume, color: '#3b4654' }));
-  const oi = data.ohlc.filter((r) => r.open_interest != null).map((r) => ({ time: r.date, value: r.open_interest }));
   candleSeries.setData(ohlc);
   volSeries.setData(vol);
-  oiSeries.setData(oi);
   chart.timeScale().fitContent();
-  oiChart.timeScale().fitContent();
   const empty = document.getElementById('chart-empty');
   if (empty) empty.classList.toggle('hidden', ohlc.length > 1);
 }

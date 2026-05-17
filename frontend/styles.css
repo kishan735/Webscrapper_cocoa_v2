@@ -120,7 +120,6 @@ tbody tr.active { background: rgba(245, 166, 35, 0.1); }
 .dn { color: var(--dn); }
 
 #chart { width: 100%; height: 360px; }
-#oi-chart { width: 100%; height: 120px; margin-top: 6px; }
 #curve-shape { width: 100%; height: 140px; }
 
 .panel.chart { position: relative; }
@@ -135,6 +134,7 @@ tbody tr.active { background: rgba(245, 166, 35, 0.1); }
   font-style: italic;
   background: rgba(22, 28, 36, 0.88);
   pointer-events: none;
+  z-index: 10;
 }
 .chart-empty.hidden { display: none; }
 
