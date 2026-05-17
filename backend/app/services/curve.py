@@ -58,6 +58,7 @@ def snapshot() -> List[Dict[str, Any]]:
             .where(Contract.active == True)  # noqa: E712
             .where(Contract.exchange == "ICE_LIFFE")
             .where(~Contract.symbol.like("%-CONTINUOUS"))
+            .where(~Contract.symbol.like("LCCc%"))
         ).all()
         contracts = sorted(contracts, key=lambda c: sort_key(c.contract_month))
         for c in contracts:
